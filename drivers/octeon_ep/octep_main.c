@@ -1818,11 +1818,18 @@ static void octep_remove(struct pci_dev *pdev)
 
 	if (status == OCTEP_DEV_STATUS_READY)
 		octep_sriov_disable(oct);
-	atomic_set(&oct->status, OCTEP_DEV_STATUS_UNINIT);
 	if (status == OCTEP_DEV_STATUS_WAIT_FOR_FW) {
+		atomic_set(&oct->status, OCTEP_DEV_STATUS_UNINIT);
 		cancel_work_sync(&oct->dev_setup_task);
 		goto free_resources;
 	}
+	/* Wait for the device setup task to complete
+	 * in case it has proceeded to setup device
+	 * after detecting fw ready
+	 */
+	flush_work(&oct->dev_setup_task);
+	atomic_set(&oct->status, OCTEP_DEV_STATUS_UNINIT);
+
 	if (oct->netdev->reg_state == NETREG_REGISTERED)
 		unregister_netdev(oct->netdev);
 
