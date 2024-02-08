@@ -354,6 +354,43 @@ static ssize_t octboot_reset_store(struct device *dev, struct device_attribute *
 }
 
 static DEVICE_ATTR(octboot_reset, 0200, NULL, octboot_reset_store);
+static ssize_t sec_bus_reset_store(struct device *dev, struct device_attribute *attr,
+                           const char *buf, size_t count)
+{
+	u16 ctrl;
+	unsigned long val;
+	struct pci_dev *pdev = to_pci_dev(dev);
+	ssize_t result = kstrtoul(buf, 0, &val);
+
+	dev_info(&pdev->dev, "sec_bus_reset count:%lx val;%lu\n", count, val);
+	if (result < 0)
+		return result;
+
+	dev_info(&pdev->dev, "sec_bus_reset count:%lx bus:%x dev:%x fn:%x\n",
+		 count, pdev->bus->self->bus->number, PCI_SLOT(pdev->bus->self->devfn),
+		 PCI_FUNC(pdev->bus->self->devfn));
+        pci_read_config_word(pdev->bus->self, PCI_BRIDGE_CONTROL, &ctrl);
+	if (val) {
+		dev_info(&pdev->dev, "1 sec_bus_reset Reset enable read val:%x\n", ctrl);
+		ctrl |= PCI_BRIDGE_CTL_BUS_RESET;
+		dev_info(&pdev->dev, "2 sec_bus_reset Reset enable read val:%x\n", ctrl);
+		pci_write_config_word(pdev->bus->self, PCI_BRIDGE_CONTROL, ctrl);
+		msleep(2);
+		pci_read_config_word(pdev->bus->self, PCI_BRIDGE_CONTROL, &ctrl);
+		dev_info(&pdev->dev, "3 sec_bus_reset Reset enable re-read val:%x\n", ctrl);
+	} else {
+		dev_info(&pdev->dev, "A sec_bus_reset Reset disable read val:%x\n", ctrl);
+		ctrl &= ~PCI_BRIDGE_CTL_BUS_RESET;
+		dev_info(&pdev->dev, "B sec_bus_reset Reset disable read val:%x\n", ctrl);
+		pci_write_config_word(pdev->bus->self, PCI_BRIDGE_CONTROL, ctrl);
+		ssleep(1);
+		pci_read_config_word(pdev->bus->self, PCI_BRIDGE_CONTROL, &ctrl);
+		dev_info(&pdev->dev, "C sec_bus_reset Reset disable re-read val:%x\n", ctrl);
+	}
+	return count;
+}
+
+static DEVICE_ATTR(sec_bus_reset, 0200, NULL, sec_bus_reset_store);
 
 int reset_target(void)
 {
@@ -392,6 +429,13 @@ int create_sysfs_entry(void)
 		}
 		else
 			dev_info(&pdev->dev, "Created sysfs entry successfully\n");
+		ret = device_create_file(&pdev->dev, &dev_attr_sec_bus_reset);
+                if (ret) {
+			pr_err("Fail to create sysfs entry for secondary bus reset\n");
+			return ret;
+		}
+		else
+			dev_info(&pdev->dev, "Created sysfs entry successfully for secondary bus reset\n");
 
 	}
 	return 0;
@@ -1836,6 +1880,7 @@ static void __exit octboot_net_exit(void)
 					continue;
 				pr_info("octboot_net exitdebug: remove sysfs\n");
 				device_remove_file(&pdev->dev, &dev_attr_octboot_reset);
+				device_remove_file(&pdev->dev, &dev_attr_sec_bus_reset);
 			}
 			continue;
 		}
@@ -1853,6 +1898,7 @@ static void __exit octboot_net_exit(void)
 	unregister_netdev(mdev->ndev);
 	teardown_mdev_resources(mdev);
 	device_remove_file(&(mdev->pdev)->dev, &dev_attr_octboot_reset);
+	device_remove_file(&(mdev->pdev)->dev, &dev_attr_sec_bus_reset);
 	pci_disable_device(mdev->pdev);
 	free_netdev(mdev->ndev);
 	gmdev[i] = NULL;
