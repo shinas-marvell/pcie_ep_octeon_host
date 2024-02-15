@@ -662,8 +662,11 @@ void octeon_ep_phc_remove(struct pci_dev *pdev)
 	flush_workqueue(oct_dev->dev_init_wq.wq);
 	destroy_workqueue(oct_dev->dev_init_wq.wq);
 	oct_dev->dev_init_wq.wq = NULL;
-	if (dev_inval == true)
-		goto before_exit;
+	if (dev_inval)
+		goto free_device;
+
+	if (!oct_dev->oct_ep_ptp_clock->ptp_clock)
+		goto destroy_resources;
 
 	ptp_clock_unregister(oct_dev->oct_ep_ptp_clock->ptp_clock);
 
@@ -674,12 +677,13 @@ void octeon_ep_phc_remove(struct pci_dev *pdev)
 	/* Reset the octeon device and cleanup all memory allocated for
 	 * the octeon device by driver.*
 	 */
+destroy_resources:
 	octeon_destroy_resources(oct_dev);
 
 	/* This octeon device has been removed. Update the global
 	 * data structure to reflect this. Free the device structure.
 	 */
-before_exit:
+free_device:
 	dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Octeon device removed\n", oct_idx);
 	kfree(oct_dev->oct_ep_ptp_clock);
 	octeon_free_device_mem(oct_dev);
