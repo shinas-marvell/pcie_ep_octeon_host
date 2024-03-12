@@ -545,7 +545,7 @@ static int mbox_check_msg_rcvd(struct octboot_net_dev *mdev,
 			return ret;
 		}
 
-		netdev_err(mdev->ndev, "Async or Sync reset of Octeon device\n");
+		netdev_info(mdev->ndev, "Async or Sync reset of Octeon device\n");
 		mutex_unlock(&mdev->mbox_lock);
 		mdev->octboot_net_restart = true;
 		/* set netdevice down */
@@ -560,7 +560,7 @@ static int mbox_check_msg_rcvd(struct octboot_net_dev *mdev,
 	}
 	if (mdev->recv_mbox_id != msg->s.hdr.id) {
 		/* new msg */
-		netdev_err(mdev->ndev, "new mbox msg id:%d opcode:%d sizew: %d\n",
+		netdev_info(mdev->ndev, "new mbox msg id:%d opcode:%d sizew: %d\n",
 			msg->s.hdr.id, msg->s.hdr.opcode, msg->s.hdr.sizew);
 
 		mdev->recv_mbox_id = msg->s.hdr.id;
@@ -579,7 +579,7 @@ static void change_host_status(struct octboot_net_dev *mdev, uint64_t status,
 {
 	union octboot_net_mbox_msg msg;
 
-	netdev_err(mdev->ndev, "change host status from %lld to %lld\n",
+	netdev_info(mdev->ndev, "change host status from %lld to %lld\n",
 		   readq(HOST_STATUS_REG(mdev)), status);
 
 	writeq(status, HOST_STATUS_REG(mdev));
@@ -758,7 +758,7 @@ static void octboot_net_init_work(struct work_struct *work)
 		octnet_num_device++;
 
 		if (is_flr_inprogress(entry_idx)) {
-			dev_err(&octnet_pci_dev->dev,
+			dev_info(&octnet_pci_dev->dev,
 				"Main device init_task Device is in PFFLR State in init_task (devid=0x%x)\n",
 				octnet_pci_dev->device);
 			continue;
@@ -790,7 +790,7 @@ static void octboot_net_poll(void)
 
 		octnet_pci_device = octboot_struct[i].octnet_pci_dev_arr;
 		if (is_flr_inprogress(i)) {
-			dev_err(&octnet_pci_device->dev, "Net poll Device is in PFFLR State in init_task (devid=0x%x)\n",
+			dev_info(&octnet_pci_device->dev, "Net poll Device is in PFFLR State in init_task (devid=0x%x)\n",
 				octnet_pci_device->device);
 			continue;
 		}
@@ -849,7 +849,7 @@ static void octboot_net_poll(void)
 			if (mdev->octboot_net_restart == true) {
 				unsigned int flags;
 
-				netdev_err(mdev->ndev, "This is restart of mgmt service task\n");
+				netdev_info(mdev->ndev, "This is restart of mgmt service task\n");
 				change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
 				netif_carrier_off(mdev->ndev);
 				napi_synchronize(&mdev->rxq[0].napi);
@@ -1575,13 +1575,13 @@ static int handle_target_status(struct octboot_net_dev *mdev)
 
 	cur_status = get_host_status(mdev);
 	target_status = get_target_status(mdev);
-	netdev_err(mdev->ndev, "host status %llu\n", cur_status);
-	netdev_err(mdev->ndev, "target status %llu\n", target_status);
+	netdev_info(mdev->ndev, "host status %llu\n", cur_status);
+	netdev_info(mdev->ndev, "target status %llu\n", target_status);
 
 	switch (cur_status) {
 	case OCTNET_HOST_READY:
 		if (target_status == OCTNET_TARGET_RUNNING) {
-			netdev_err(mdev->ndev, "octboot_net: target running\n");
+			netdev_info(mdev->ndev, "octboot_net: target running\n");
 			change_host_status(mdev, OCTNET_HOST_RUNNING, false);
 			netif_carrier_on(mdev->ndev);
 		}
@@ -1589,7 +1589,7 @@ static int handle_target_status(struct octboot_net_dev *mdev)
 	case OCTNET_HOST_RUNNING:
 		target_status = get_target_status(mdev);
 		if (target_status != OCTNET_TARGET_RUNNING) {
-			netdev_err(mdev->ndev, "octboot_net: target stopped\n");
+			netdev_info(mdev->ndev, "octboot_net: target stopped\n");
 			change_host_status(mdev, OCTNET_HOST_GOING_DOWN,
 						   false);
 			netif_carrier_off(mdev->ndev);
@@ -1625,11 +1625,11 @@ static void octboot_net_task(struct work_struct *work)
 	smp_mb__after_atomic();
 	index = find_octboot_net_entry(mdev->pdev);
 	if ((index >= 0) && is_flr_inprogress(index)) {
-		dev_err(&(mdev->pdev)->dev, "net_task: In PFFLR State (devid=0x%x)\n",
+		dev_info(&(mdev->pdev)->dev, "net_task: In PFFLR State (devid=0x%x)\n",
 			mdev->pdev->device);
 		clear_bit(TASK_STATUS_RUNNING, &mdev->task_status);
 		smp_mb__after_atomic();
-		dev_err(&(mdev->pdev)->dev, "net_task: In PFFLR State (devid=0x%x) BIT:%x\n",
+		dev_info(&(mdev->pdev)->dev, "net_task: In PFFLR State (devid=0x%x) BIT:%x\n",
 			mdev->pdev->device, test_bit(TASK_STATUS_RUNNING, &mdev->task_status));
 		return;
 	}
@@ -1660,7 +1660,7 @@ static void octboot_net_task(struct work_struct *work)
 	}
 	index = find_octboot_net_entry(mdev->pdev);
 	if ((index >= 0) && is_flr_inprogress(index)) {
-		dev_err(&(mdev->pdev)->dev, "net_task:End in PFFLR State (devid=0x%x)\n",
+		dev_info(&(mdev->pdev)->dev, "net_task:End in PFFLR State (devid=0x%x)\n",
 			mdev->pdev->device);
 		clear_bit(TASK_STATUS_RUNNING, &mdev->task_status);
 		smp_mb__after_atomic();
