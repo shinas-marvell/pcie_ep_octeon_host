@@ -1218,7 +1218,7 @@ static int octep_set_vf_vlan(struct net_device *dev, int vf, u16 vlan, u8 qos, _
 {
 	struct octep_device *oct = netdev_priv(dev);
 
-	dev_err(&oct->pdev->dev, "Setting VF VLAN not supported\n");
+	dev_info(&oct->pdev->dev, "Setting VF VLAN not supported\n");
 	return 0;
 }
 
@@ -1226,7 +1226,7 @@ static int octep_set_vf_spoofchk(struct net_device *dev, int vf, bool setting)
 {
 	struct octep_device *oct = netdev_priv(dev);
 
-	dev_err(&oct->pdev->dev, "Setting VF spoof check not supported\n");
+	dev_info(&oct->pdev->dev, "Setting VF spoof check not supported\n");
 	return 0;
 }
 
@@ -1234,7 +1234,7 @@ static int octep_set_vf_trust(struct net_device *dev, int vf, bool setting)
 {
 	struct octep_device *oct = netdev_priv(dev);
 
-	dev_err(&oct->pdev->dev, "Setting VF trust not supported\n");
+	dev_info(&oct->pdev->dev, "Setting VF trust not supported\n");
 	return 0;
 }
 
@@ -1242,7 +1242,7 @@ static int octep_set_vf_rate(struct net_device *dev, int vf, int min_tx_rate, in
 {
 	struct octep_device *oct = netdev_priv(dev);
 
-	dev_err(&oct->pdev->dev, "Setting VF rate not supported\n");
+	dev_info(&oct->pdev->dev, "Setting VF rate not supported\n");
 	return 0;
 }
 
@@ -1250,7 +1250,7 @@ static int octep_set_vf_link_state(struct net_device *dev, int vf, int link_stat
 {
 	struct octep_device *oct = netdev_priv(dev);
 
-	dev_err(&oct->pdev->dev, "Setting VF link state not supported\n");
+	dev_info(&oct->pdev->dev, "Setting VF link state not supported\n");
 	return 0;
 }
 

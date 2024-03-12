@@ -362,7 +362,7 @@ static int process_mbox_notify(struct octep_device *oct,
 		}
 		break;
 	default:
-		pr_info("Unknown mbox req : %u\n", req->hdr.s.cmd);
+		pr_err("Unknown mbox req : %u\n", req->hdr.s.cmd);
 		break;
 	}
 
