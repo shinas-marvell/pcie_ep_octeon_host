@@ -164,7 +164,7 @@ static int octep_vf_setup_oq(struct octep_vf_device *oct, int q_no)
 			"Failed to allocate DMA memory for OQ-%d !!\n", q_no);
 		goto desc_dma_alloc_err;
 	}
-	dev_err(oq->dev,
+	dev_info(oq->dev,
 		"***** Q.No-%d desc_ring_dma:0x%llx !!\n", q_no, oq->desc_ring_dma);
 
 	oq->buff_info = (struct octep_vf_rx_buffer *)

@@ -493,7 +493,7 @@ static void octep_vf_hb_timeout_task(struct work_struct *work)
 	mbox = oct->mbox;
         pf_vf_data = readq(mbox->mbox_read_reg);
 	if (pf_vf_data == 0xFFFFFFFFFFFFFFFFU) {
-		dev_err(&oct->pdev->dev, "VF interface :%s. carrier off\n",
+		dev_info(&oct->pdev->dev, "VF interface :%s. carrier off\n",
 			oct->netdev->name);
 		netif_carrier_off(oct->netdev);
 		return;
