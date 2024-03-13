@@ -223,15 +223,10 @@ static int octep_vf_setup_iq(struct octep_vf_device *oct, int q_no)
 		goto buff_info_err;
 	}
 
+	/* Setup sglist addresses in tx_buffer entries */
 	for (i = 0; i < CFG_GET_IQ_NUM_DESC(oct->conf); i++) {
 		struct octep_vf_tx_buffer *tx_buffer;
-		struct octep_vf_instr_hdr *ih;
 
-		/* Prefill common fields in instruction header */
-		ih = &iq->desc_ring[i].ih;
-		ih->pkind = oct->fw_info.pkind;
-		ih->fsz = oct->fw_info.fsz;
-		/* Setup sglist addresses in tx_buffer entries */
 		tx_buffer = &iq->buff_info[i];
 		tx_buffer->sglist =
 			&iq->sglist[i * OCTEP_VF_SGLIST_ENTRIES_PER_PKT];

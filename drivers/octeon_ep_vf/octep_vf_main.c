@@ -763,6 +763,10 @@ static netdev_tx_t octep_vf_start_xmit(struct sk_buff *skb,
 	tx_buffer->skb = skb;
 
 	ih = &hw_desc->ih;
+	ih->tlen = skb->len;
+	/* TODO prefill */
+	ih->pkind = oct->fw_info.pkind;
+	ih->fsz = oct->fw_info.fsz;
 	ih->tlen = skb->len + ih->fsz;
 
 	if (!nr_frags) {
