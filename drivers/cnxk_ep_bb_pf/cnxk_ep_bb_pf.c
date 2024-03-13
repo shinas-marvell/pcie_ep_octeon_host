@@ -8,6 +8,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/version.h>
 
 #define DRV_NAME "cnxk_ep_bb_pf"
 
@@ -58,7 +59,11 @@ static int cnxk_epbb_pf_probe(struct pci_dev *pdev,
 		goto probe_exit;
 	}
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
 	ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(64));
+#else
+	ret = dma_set_mask(&pdev->dev, DMA_BIT_MASK(64));
+#endif
 	if (ret) {
 		dev_err(dev, "Failed to set DMA mask on otx2 device:0x%x\n",
 			ret);
