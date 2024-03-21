@@ -8,7 +8,6 @@
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/aer.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/rtnetlink.h>
@@ -16,6 +15,11 @@
 
 #include "octep_compat.h"
 #include "octep_config.h"
+
+#if defined(USE_PCIE_ERROR_REPORTING_API)
+#include <linux/aer.h>
+#endif
+
 #include "octep_main.h"
 #include "octep_ctrl_net.h"
 #include "octep_pfvf_mbox.h"
@@ -1758,7 +1762,9 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_pci_regions;
 	}
 
+#if defined(USE_PCIE_ERROR_REPORTING_API)
 	pci_enable_pcie_error_reporting(pdev);
+#endif
 	octep_enable_ptm(pdev);
 	pci_set_master(pdev);
 
@@ -1787,7 +1793,9 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	return 0;
 
 err_alloc_netdev:
+#if defined(USE_PCIE_ERROR_REPORTING_API)
 	pci_disable_pcie_error_reporting(pdev);
+#endif
 	pci_release_mem_regions(pdev);
 err_pci_regions:
 err_dma_mask:
@@ -1838,7 +1846,9 @@ static void octep_remove(struct pci_dev *pdev)
 free_resources:
 	pci_release_mem_regions(pdev);
 	free_netdev(oct->netdev);
+#if defined(USE_PCIE_ERROR_REPORTING_API)
 	pci_disable_pcie_error_reporting(pdev);
+#endif
 	pci_disable_device(pdev);
 }
 

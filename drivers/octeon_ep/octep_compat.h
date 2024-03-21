@@ -11,6 +11,10 @@
 #include <linux/version.h>
 
 #if defined(RHEL_RELEASE_CODE)
+#if (RHEL_RELEASE_VERSION(9, 4) > RHEL_RELEASE_CODE)
+#define USE_PCIE_ERROR_REPORTING_API
+#endif
+
 #if (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,4))
 #define TX_TIMEOUT_HAS_TXQ_ARG 1
 #if (RHEL_RELEASE_VERSION(8, 9) <= RHEL_RELEASE_CODE)
@@ -59,6 +63,10 @@ int pci_enable_ptm(struct pci_dev *dev, u8 *granularity);
 #endif
 #if KERNEL_VERSION(5, 19, 0) <= LINUX_VERSION_CODE
 #define NO_SET_GSO_API
+#endif
+
+#if KERNEL_VERSION(6, 0, 0) > LINUX_VERSION_CODE
+#define USE_PCIE_ERROR_REPORTING_API
 #endif
 #endif
 
