@@ -13,6 +13,13 @@ Known Issues
 
 Change Logs
 -----------
+v24.03
+~~~~~
+- octeon_ep: Fix race condtition in driver remove.
+- phc: Fix initialization path.
+- octboot_net: Fix creation of sysfs entry.
+- octboot_net: Provide interface to trigger secondary bus reset.
+
 v24.02
 ~~~~~
 - octeon_ep_vf: Set VF carrier OFF when heartbeats timeout.
