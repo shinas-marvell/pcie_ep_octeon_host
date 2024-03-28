@@ -1361,7 +1361,7 @@ static void octep_hb_timeout_task(struct work_struct *work)
 		return;
 	}
 
-	dev_err(&oct->pdev->dev, "Missed %u heartbeats. carrier off\n",
+	dev_info(&oct->pdev->dev, "Missed %u heartbeats. carrier off\n",
 		miss_cnt);
 	netif_carrier_off(oct->netdev);
 }

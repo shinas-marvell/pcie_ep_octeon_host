@@ -92,7 +92,7 @@ int octep_ctrl_mbox_init(struct octep_ctrl_mbox *mbox)
 
 	status = readq(OCTEP_CTRL_MBOX_INFO_FW_STATUS(mbox->barmem));
 	if (status != OCTEP_CTRL_MBOX_STATUS_READY) {
-		pr_err("octep_ctrl_mbox : Firmware is not ready.\n");
+		pr_info("octep_ctrl_mbox : Firmware is not ready.\n");
 		return -EINVAL;
 	}
 
