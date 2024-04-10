@@ -639,6 +639,11 @@ static irqreturn_t octep_ioq_intr_handler_cn93_pf(void *data)
 static int octep_soft_reset_cn98_pf(struct octep_device *oct)
 {
 	dev_info(&oct->pdev->dev, "CN98XX: skip soft reset\n");
+	/* Set Firmware status back to ready (1) for cn98xx cards as device remove
+	 * wouldn't reset the card
+	 */
+	OCTEP_PCI_WIN_WRITE(oct, CN9K_PEMX_PFX_CSX_PFCFGX(0, 0, CN9K_PCIEEP_VSECST_CTL),
+			FW_STATUS_READY);
 	return 0;
 }
 
@@ -657,9 +662,8 @@ static int octep_soft_reset_cn93_pf(struct octep_device *oct)
 	 * the OcteonTX is unexpectedly reset, reboots, and then
 	 * the module is removed.
 	 */
-	if (oct->chip_id == OCTEP_PCI_DEVICE_ID_CNF95N_PF)
-		OCTEP_PCI_WIN_WRITE(oct, CN9K_PEMX_PFX_CSX_PFCFGX(0, 0, CN9K_PCIEEP_VSECST_CTL),
-				    FW_STATUS_RUNNING);
+	OCTEP_PCI_WIN_WRITE(oct, CN9K_PEMX_PFX_CSX_PFCFGX(0, 0, CN9K_PCIEEP_VSECST_CTL),
+			FW_STATUS_RUNNING);
 	/* Set core domain reset bit */
 	OCTEP_PCI_WIN_WRITE(oct, CN93_RST_CORE_DOMAIN_W1S, 1);
 	/* Wait for 100ms as Octeon resets. */
@@ -938,7 +942,6 @@ void octep_device_setup_cn93_pf(struct octep_device *oct)
 	 * Set it to RUNNING early in boot, so that unexpected resets
 	 * leave it in a state that is not READY (1).
 	 */
-	if (oct->chip_id == OCTEP_PCI_DEVICE_ID_CNF95N_PF)
-		OCTEP_PCI_WIN_WRITE(oct, CN9K_PEMX_PFX_CSX_PFCFGX(0, 0, CN9K_PCIEEP_VSECST_CTL),
-				    FW_STATUS_RUNNING);
+	OCTEP_PCI_WIN_WRITE(oct, CN9K_PEMX_PFX_CSX_PFCFGX(0, 0, CN9K_PCIEEP_VSECST_CTL),
+			FW_STATUS_RUNNING);
 }
