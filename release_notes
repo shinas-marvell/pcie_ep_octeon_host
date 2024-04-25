@@ -13,6 +13,15 @@ Known Issues
 
 Change Logs
 -----------
+v24.04
+~~~~~
+- octeon_ep: disable interrupts per ring when interface stops.
+- octeon_ep: Fix log levels for debug prints.
+- octeon_ep: Drop redundant pci_enable_pcie_error_reporting.
+- cnxk_ep_bb_pf : Fix compilation issue with pci_set_dma_mask api.
+- octboot_net: Fix log levels for debug prints.
+- octeon_ep_vf: Fix log levels for debug prints.
+
 v24.03
 ~~~~~
 - octeon_ep: Fix race condtition in driver remove.
