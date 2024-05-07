@@ -14,6 +14,7 @@
 #include <linux/workqueue.h>
 #include <linux/circ_buf.h>
 #include <linux/version.h>
+#include <linux/reboot.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 #include <linux/sched/signal.h>
 #endif
@@ -49,7 +50,8 @@ struct octboot_net_struct {
 	atomic_t flr_status;
 };
 
-static struct octboot_net_struct octboot_struct[8];
+#define NUM_OCTBOOT_NET_STRUCT 8
+static struct octboot_net_struct octboot_struct[NUM_OCTBOOT_NET_STRUCT];
 
 static struct workqueue_struct *octboot_net_init_wq;
 static struct delayed_work octboot_net_init_task;
@@ -599,7 +601,7 @@ static int find_octboot_net_entry(struct pci_dev *octnet_pci_dev)
 	pci_device = PCI_SLOT(octnet_pci_dev->devfn);
 	pci_fn = PCI_FUNC(octnet_pci_dev->devfn);
 
-	for (i = 0; i < 8; i++) {
+	for (i = 0; i < NUM_OCTBOOT_NET_STRUCT; i++) {
 		if (octboot_struct[i].initialized &&
 			octboot_struct[i].pci_bus == pci_bus &&
 			octboot_struct[i].pci_device == pci_device &&
@@ -620,7 +622,7 @@ static int add_octboot_net_entry(struct pci_dev *octnet_pci_dev)
 	pci_device = PCI_SLOT(octnet_pci_dev->devfn);
 	pci_fn = PCI_FUNC(octnet_pci_dev->devfn);
 
-	for (i = 0; i < 8; i++) {
+	for (i = 0; i < NUM_OCTBOOT_NET_STRUCT; i++) {
 		if (!octboot_struct[i].initialized) {
 			octboot_struct[i].octnet_pci_dev_arr = octnet_pci_dev;
 			octboot_struct[i].pci_bus = pci_bus;
@@ -1822,6 +1824,33 @@ conf_err:
 	return;
 }
 
+static int octboot_reboot_notify(struct notifier_block *nb,
+				unsigned long code, void *unused)
+{
+	int i;
+	uint16_t ctrl;
+
+	pr_err("%s() called with code %lu\n", __func__, code);
+
+	for (i = 0; i < NUM_OCTBOOT_NET_STRUCT; i++) {
+		if (octboot_struct[i].initialized) {
+			struct pci_dev *pdev = octboot_struct[i].octnet_pci_dev_arr;
+			pci_read_config_word(pdev->bus->self, PCI_BRIDGE_CONTROL, &ctrl);
+			ctrl |= PCI_BRIDGE_CTL_BUS_RESET;
+			pr_err("Secondary bus reset enable at reboot. BRIDGE_CONTROL:%x\n", ctrl);
+			pci_write_config_word(pdev->bus->self, PCI_BRIDGE_CONTROL, ctrl);
+		}
+	}
+
+	msleep(1);
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block reboot_notifier = {
+    .notifier_call = octboot_reboot_notify,
+};
+
 static int __init octboot_net_init(void)
 {
 	int ret;
@@ -1846,6 +1875,9 @@ static int __init octboot_net_init(void)
 
 	INIT_DELAYED_WORK(&octboot_net_init_task, octboot_net_init_work);
 	queue_delayed_work(octboot_net_init_wq, &octboot_net_init_task, 0);
+
+	register_reboot_notifier(&reboot_notifier);
+
 	return 0;
 }
 
@@ -1866,6 +1898,8 @@ static void __exit octboot_net_exit(void)
 	struct octboot_net_dev *mdev;
 	struct pci_dev *pdev = NULL;
 	int i;
+
+	unregister_reboot_notifier(&reboot_notifier);
 
 	cancel_delayed_work(&octboot_net_init_task);
 	flush_workqueue(octboot_net_init_wq);
