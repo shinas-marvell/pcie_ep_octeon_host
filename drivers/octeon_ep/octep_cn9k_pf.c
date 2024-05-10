@@ -639,11 +639,6 @@ static irqreturn_t octep_ioq_intr_handler_cn93_pf(void *data)
 static int octep_soft_reset_cn98_pf(struct octep_device *oct)
 {
 	dev_info(&oct->pdev->dev, "CN98XX: skip soft reset\n");
-	/* Set Firmware status back to ready (1) for cn98xx cards as device remove
-	 * wouldn't reset the card
-	 */
-	OCTEP_PCI_WIN_WRITE(oct, CN9K_PEMX_PFX_CSX_PFCFGX(0, 0, CN9K_PCIEEP_VSECST_CTL),
-			FW_STATUS_READY);
 	return 0;
 }
 
@@ -936,6 +931,9 @@ void octep_device_setup_cn93_pf(struct octep_device *oct)
 
 	octep_init_config_cn93_pf(oct);
 	octep_configure_ring_mapping_cn93_pf(oct);
+
+	if (oct->chip_id == OCTEP_PCI_DEVICE_ID_CN98_PF)
+		return;
 
 	/* Firmware status CSR is supposed to be cleared by
 	 * core domain reset, but due to IPBUPEM-38842, it is not.
