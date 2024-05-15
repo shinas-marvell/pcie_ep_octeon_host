@@ -2031,8 +2031,10 @@ void octep_pcie_resume(struct pci_dev *pdev)
 static void octep_pci_error_reset_prepare(struct pci_dev *pdev)
 {
 	struct octep_device *oct = pci_get_drvdata(pdev);
-	int num_vfs = 0, vf_idx = 0;
+	int num_vfs = 0, vf_idx = 0, vf_mbox_queue, count;
 	union octep_pfvf_mbox_word notif = { 0 };
+	union octep_pfvf_mbox_word notif_resp = { 0 };
+	struct octep_mbox *mbox;
 
 	dev_info(&pdev->dev, "Reset prepare state:%ld status:%d\n",
 		 oct->state, atomic_read(&oct->status));
@@ -2049,8 +2051,21 @@ static void octep_pci_error_reset_prepare(struct pci_dev *pdev)
 			octep_send_notification(oct, vf_idx, notif);
 			dev_info(&pdev->dev, "Reset prepare sent RESET to Vf:%d\n",
 				 vf_idx);
+			vf_mbox_queue = vf_idx * (CFG_GET_MAX_RPVF(oct->conf));
+			mbox = oct->mbox[vf_mbox_queue];
+			for (count = 0; count < OCTEP_PFVF_MBOX_TIMEOUT_WAIT_COUNT; count++) {
+				usleep_range(1000, 1500);
+				notif_resp.u64 = readq(mbox->pf_vf_data_reg);
+				if (notif_resp.s.type == OCTEP_PFVF_MBOX_TYPE_RSP_ACK) {
+					dev_info(&pdev->dev, "Recived ACK to FLR notification of Vf:%d cnt:%d resp:0x%llx\n",
+						 vf_idx, count, notif_resp.u64);
+					break;
+				}
+			}
+			if (count == OCTEP_PFVF_MBOX_TIMEOUT_WAIT_COUNT)
+				dev_info(&pdev->dev, "ACK response timeout to FLR notification of Vf:%d cnt:%d resp:0x%llx\n",
+					 vf_idx, count, readq(mbox->pf_vf_data_reg));
 		}
-		msleep(5);
 		octep_reset_prepare(pdev);
 	} else if (atomic_read(&oct->status) == OCTEP_DEV_STATUS_WAIT_FOR_FW) {
 		dev_info(&pdev->dev, "Reset prepare OCTEP STATUS WAIT FOR FW Started\n");
