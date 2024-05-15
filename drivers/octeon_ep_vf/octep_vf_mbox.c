@@ -108,8 +108,12 @@ void octep_vf_mbox_work(struct work_struct *work)
 		}
 		break;
 	case OCTEP_PFVF_MBOX_NOTIF_PF_FLR:
-		dev_info(&oct->pdev->dev, "PF FLR octep_vf_reset_prepare\n");
+		dev_info(&oct->pdev->dev, "Received PF FLR notification octep_vf_reset_prepare val:%llx\n", pf_vf_data);
 		octep_vf_reset_prepare(oct->pdev);
+		notif->s.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
+		writeq(pf_vf_data, mbox->mbox_read_reg);
+		pf_vf_data = readq(mbox->mbox_read_reg);
+		dev_info(&oct->pdev->dev, "Send ACK to PF FLR notification octep_vf_reset_prepare val:%llx\n", pf_vf_data);
 		break;
 	default:
 		dev_err(&oct->pdev->dev,

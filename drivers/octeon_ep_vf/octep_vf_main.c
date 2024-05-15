@@ -654,6 +654,7 @@ int octep_vf_reset_prepare(struct pci_dev *pdev)
 	struct net_device *netdev = oct->netdev;
 
 	dev_info(&pdev->dev, "Start VF reset prepare ...\n");
+	cancel_delayed_work_sync(&oct->hb_task);
 
 	clear_bit(OCTEP_VF_DEV_STATE_OPEN, &oct->state);
 	smp_mb__after_atomic();
