@@ -184,6 +184,8 @@ static void octep_pfvf_get_mac_addr(struct octep_device *oct,  u32 vf_id,
 		dev_err(&oct->pdev->dev, "Get VF MAC address failed via host control Mbox\n");
 		return;
 	}
+
+	ether_addr_copy(oct->vf_info[vf_id].mac_addr, rsp->s_set_mac.mac_addr);
 	rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 }
 
