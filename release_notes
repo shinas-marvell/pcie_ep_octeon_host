@@ -13,6 +13,11 @@ Known Issues
 
 Change Logs
 -----------
+v24.05
+~~~~~
+- octeon_ep:  Added FW ready state for 96xx chips.
+- octboot_net: Reset notifier callback will perform secondary bus reset.
+
 v24.04
 ~~~~~
 - octeon_ep: disable interrupts per ring when interface stops.
