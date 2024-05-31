@@ -827,13 +827,19 @@ static int octep_stop(struct net_device *netdev)
 
 	netdev_info(netdev, "Stopping the device ...\n");
 
+	if (!test_bit(OCTEP_DEV_STATE_OPEN, &oct->state)) {
+		netdev_info(netdev, "Already Stopped the device by FLR\n");
+		return 0;
+	}
+
 	clear_bit(OCTEP_DEV_STATE_OPEN, &oct->state);
 	smp_mb__after_atomic();
-	while (octep_drv_busy(oct))
-		msleep(20);
 
 	set_bit(OCTEP_DEV_STATE_DOWN_IN_PROGRESS, &oct->state);
 	smp_mb__after_atomic();
+
+	while (octep_drv_busy(oct))
+		msleep(20);
 
 	octep_ctrl_net_set_link_status(oct, OCTEP_CTRL_NET_INVALID_VFID, false,
 				       false);
@@ -1913,21 +1919,39 @@ static int octep_reset_prepare(struct pci_dev *pdev)
 
 	dev_info(&pdev->dev, "A Start octep_reset_prepare ...\n");
 
-	oct->poll_non_ioq_intr = false;
+	if (oct->poll_non_ioq_intr) {
+		cancel_delayed_work_sync(&oct->intr_poll_task);
+		oct->poll_non_ioq_intr = false;
+	}
+
 	clear_bit(OCTEP_DEV_STATE_OPEN, &oct->state);
 	smp_mb__after_atomic();
 	while (octep_drv_busy(oct))
 		msleep(20);
 	dev_info(&pdev->dev, "B Start octep_reset_prepare ...\n");
 
+	octep_ctrl_net_set_link_status(oct, OCTEP_CTRL_NET_INVALID_VFID, false,
+				       false);
+	octep_ctrl_net_set_rx_state(oct, OCTEP_CTRL_NET_INVALID_VFID, false,
+				    false);
 	/* Stop Tx from stack */
 	netif_tx_stop_all_queues(netdev);
 	netif_carrier_off(netdev);
 	netif_tx_disable(netdev);
 
 	oct->hw_ops.disable_interrupts(oct);
+	octep_napi_disable(oct);
+	octep_napi_delete(oct);
+
+	octep_clean_irqs(oct);
+	octep_clean_iqs(oct);
 	oct->hw_ops.disable_io_queues(oct);
-	cancel_delayed_work_sync(&oct->intr_poll_task);
+	oct->hw_ops.reset_io_queues(oct);
+	octep_free_oqs(oct);
+	octep_free_iqs(oct);
+
+	if (oct->netdev->reg_state == NETREG_REGISTERED)
+                unregister_netdev(oct->netdev);
 	dev_info(&pdev->dev, "Done octep_reset_prepare ...\n");
 	return 0;
 }
