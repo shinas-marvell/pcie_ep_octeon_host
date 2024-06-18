@@ -13,6 +13,13 @@ Known Issues
 
 Change Logs
 -----------
+v24.06
+~~~~~
+- octeon_ep: Fix issue with ip link command showing VFs mac as all 0's.
+- octeon_ep: PF to VF PF FLR notification.
+- octeon_ep_vf: VF to PF PF FLR acknowledgement.
+- octeon_ep:  Clean PF resources to avoid AER UCE during reset handling.
+
 v24.05
 ~~~~~
 - octeon_ep:  Added FW ready state for 96xx chips.
