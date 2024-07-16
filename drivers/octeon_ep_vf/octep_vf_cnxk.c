@@ -317,6 +317,10 @@ static irqreturn_t octep_vf_ioq_intr_handler_cnxk(void *data)
 			octep_vf_write_csr64(oct, CNXK_VF_SDP_R_MBOX_PF_VF_INT(0), reg_val);
 		}
 	}
+
+	if (!(oq->napi))
+		return IRQ_HANDLED;
+
 	napi_schedule_irqoff(oq->napi);
 	return IRQ_HANDLED;
 }
