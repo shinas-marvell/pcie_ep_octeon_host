@@ -305,9 +305,18 @@ static void cnxk_handle_vf_mbox_intr(struct octep_vf_device *oct)
 static irqreturn_t octep_vf_ioq_intr_handler_cnxk(void *data)
 {
 	struct octep_vf_ioq_vector *vector = (struct octep_vf_ioq_vector *)data;
-	struct octep_vf_oq *oq = vector->oq;
-	struct octep_vf_device *oct = vector->octep_vf_dev;
+	struct octep_vf_oq *oq;
+	struct octep_vf_device *oct;
 	u64 reg_val = 0ULL;
+
+	if (!vector)
+		return IRQ_HANDLED;
+
+	oq = vector->oq;
+	if (!oq)
+		return IRQ_HANDLED;
+
+	oct = vector->octep_vf_dev;
 
 	/* Mailbox interrupt arrives along with interrupt of tx/rx ring pair 0 */
 	if (oq->q_no == 0) {
