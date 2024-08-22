@@ -28,6 +28,19 @@
 #define OCTBOOT_NET_VERSION_MAJOR 1
 #define OCTBOOT_NET_VERSION_MINOR 0
 
+#define    CN93_SDP_WIN_WR_ADDR64                0x20000
+#define    CN93_SDP_WIN_RD_ADDR64                0x20010
+#define    CN93_SDP_WIN_WR_DATA64                0x20020
+#define    CN93_SDP_WIN_WR_MASK_REG              0x20030
+#define    CN93_SDP_WIN_RD_DATA64                0x20040
+#define    CN93_RST_CORE_DOMAIN_W1S    0x000087E006001820ULL
+#define    CN93_RST_CORE_DOMAIN_W1C    0x000087E006001828ULL
+
+#define    CNXK_SDP_WIN_WR_MASK_REG              0x20030
+#define    CNXK_RST_CHIP_DOMAIN_W1S    0x000087E006001810ULL
+#define    CNXK_SDP_WIN_WR_ADDR64                0x20000
+#define    CNXK_SDP_WIN_WR_DATA64                0x20020
+
 /* Device status */
 enum octboot_net_status {
         OCTBOOT_DEV_STATUS_READY,
@@ -224,6 +237,8 @@ typedef struct {
 	bool enabled;
 	struct pci_dev *pdev;
 	struct pci_saved_state *pci_saved_state;
+	struct pci_dev *pdev_pf1;
+	struct pci_saved_state *pci_saved_state_pf1;
 } octboot_net_device_t;
 
 octboot_net_device_t octboot_net_device[8];
@@ -241,7 +256,60 @@ static int no_reset;
 module_param(no_reset, int, 0);
 MODULE_PARM_DESC(no_reset, "At module load: "
                  "0 = reset supported cards(*)  1 = do not reset");
+#define FW_STATUS_DOWNING      0ULL
+#define CNXK_PCIEEP_VSECST_CTL  0x418
+#define CNXK_PEMX_PFX_CSX_PFCFGX(pem, pf, offset)      ((0x8e0000008000 | (uint64_t)pem << 36 \
+                                                | pf << 18 \
+                                                | ((offset >> 16) & 1) << 16 \
+                                                | (offset >> 3) << 3) \
+                                                + (((offset >> 2) & 1) << 2))
+/* Register defines for use with CN9K_PEMX_PFX_CSX_PFCFGX */
+#define CN9K_PCIEEP_VSECST_CTL  0x4D0
+#define CN9K_PEMX_PFX_CSX_PFCFGX(pem, pf, offset)      ((0x8e0000008000 | (uint64_t)pem << 36 \
+                                                        | pf << 18 \
+                                                        | ((offset >> 16) & 1) << 16 \
+                                                        | (offset >> 3) << 3) \
+                                                        + (((offset >> 2) & 1) << 2))
 
+
+static inline void
+OCTEP_PCI_WIN_WRITE(u8 *wr_addr, u8 *wr_data, u64 addr, u64 val)
+{
+        writeq(addr, wr_addr);
+        writeq(val, wr_data);
+
+        pr_info("%s: reg: 0x%016llx val: 0x%016llx\n", __func__, addr, val);
+}
+
+void reset_fw_ready_state(struct pci_dev *pdev)
+{
+	void *hw_addr;
+	unsigned long start, len;
+	u8 __iomem *pci_win_wr_addr;
+	u8 __iomem *pci_win_wr_data;
+
+
+	start = pci_resource_start(pdev, 0);
+	len = pci_resource_len(pdev, 0);
+	hw_addr = ioremap(start, len);
+	dev_info(&pdev->dev, "Octeon reset_fw_ready_state ioremap ...\n");
+	if (pdev->device != device_id_f105n) {
+		pci_win_wr_addr = (u8 __iomem *)(hw_addr + CN93_SDP_WIN_WR_ADDR64);
+		pci_win_wr_data = (u8 __iomem *)(hw_addr + CN93_SDP_WIN_WR_DATA64);
+		dev_info(&pdev->dev, "Octeon reset_fw_ready_state 95N ...\n");
+		OCTEP_PCI_WIN_WRITE(pci_win_wr_addr, pci_win_wr_data, CN9K_PEMX_PFX_CSX_PFCFGX(0, 0, CN9K_PCIEEP_VSECST_CTL),
+                            FW_STATUS_DOWNING);
+
+	} else {
+		dev_info(&pdev->dev, "Octeon reset_fw_ready_state 105N ...\n");
+		pci_win_wr_addr = (u8 __iomem *)(hw_addr + CNXK_SDP_WIN_WR_ADDR64);
+		pci_win_wr_data = (u8 __iomem *)(hw_addr + CNXK_SDP_WIN_WR_DATA64);
+		OCTEP_PCI_WIN_WRITE(pci_win_wr_addr, pci_win_wr_data, CNXK_PEMX_PFX_CSX_PFCFGX(0, 0, CNXK_PCIEEP_VSECST_CTL),
+                            FW_STATUS_DOWNING);
+	}
+	iounmap(hw_addr);
+	dev_info(&pdev->dev, "Octeon reset_fw_ready_state iounmap ...\n");
+}
 
 bool is_flr_inprogress(int index)
 {
@@ -346,6 +414,7 @@ static ssize_t octboot_reset_store(struct device *dev, struct device_attribute *
 	struct pci_dev *pdev = to_pci_dev(dev);
 
 	dev_info(&pdev->dev, "octboot_reset initiated\n");
+	reset_fw_ready_state(pdev);
 	octboot_reset_prepare(dev);
 	dev_info(&pdev->dev, "octboot_reset pci_reset_function start\n");
 	ret = pci_reset_function(pdev);
@@ -403,6 +472,7 @@ int reset_target(void)
 		    (pdev->device != device_id_f105n))
 			continue;
 
+		reset_fw_ready_state(pdev);
 		dev_info(&pdev->dev, "Reset Octeon from octboot_net driver\n");
 		ret = pci_reset_function(pdev);
 		if (ret) {
@@ -675,6 +745,12 @@ static int octboot_enable_device(octboot_net_device_t *octboot_dev)
 		dev_info(&pdev->dev, "Device available but BAR addr is reset; restore config\n");
 		pci_load_saved_state(pdev, octboot_dev->pci_saved_state);
 		pci_restore_state(pdev);
+		if (octboot_dev->pdev_pf1) {
+			dev_info(&pdev->dev, "restoring pci state of PF1 ...\n");
+			pci_load_saved_state(octboot_dev->pdev_pf1, octboot_dev->pci_saved_state_pf1);
+			pci_restore_state(octboot_dev->pdev_pf1);
+		}
+
 	}
 
 	if (!pci_device_is_present(pdev) ||
@@ -732,7 +808,9 @@ static int octboot_enable_device(octboot_net_device_t *octboot_dev)
 static void octboot_net_init_work(struct work_struct *work)
 {
 	struct pci_dev *octnet_pci_dev = NULL;
+	struct pci_dev *octnet_pci_dev_pf1 = NULL;
 	int entry_idx, ret;
+
 
 	octnet_num_device = 0;
 	while ((octnet_pci_dev = pci_get_device(vendor_id, PCI_ANY_ID, octnet_pci_dev))) {
@@ -757,6 +835,18 @@ static void octboot_net_init_work(struct work_struct *work)
 		}
 
 		octboot_net_device[entry_idx].pdev = octnet_pci_dev;
+			/* Get PF1 pcie dev */
+		octnet_pci_dev_pf1 = pci_get_domain_bus_and_slot(pci_domain_nr(octnet_pci_dev->bus),
+								octnet_pci_dev->bus->number,
+								(octnet_pci_dev->devfn + 1));
+		dev_dbg(&octnet_pci_dev->dev,
+			"PF0 Initializing device (devid=0x%x) domain:%x bus_num:%x func:%x\n",
+			octnet_pci_dev->device, pci_domain_nr(octnet_pci_dev->bus), octnet_pci_dev->bus->number, octnet_pci_dev->devfn);
+		if (octnet_pci_dev_pf1) {
+			octboot_net_device[entry_idx].pdev_pf1 = octnet_pci_dev_pf1;
+			dev_dbg(&octnet_pci_dev_pf1->dev, "PF1 Initializing device (devid=0x%x) domain:%x bus_num:%x func:%x\n",
+			octnet_pci_dev_pf1->device, pci_domain_nr(octnet_pci_dev_pf1->bus), octnet_pci_dev_pf1->bus->number, octnet_pci_dev_pf1->devfn);
+		}
 		octnet_num_device++;
 
 		if (is_flr_inprogress(entry_idx)) {
@@ -821,6 +911,15 @@ static void octboot_net_poll(void)
 					kfree(octboot_net_device[i].pci_saved_state);
 				octboot_net_device[i].pci_saved_state =
 					pci_store_saved_state(octnet_pci_device);
+
+				if (octboot_net_device[i].pdev_pf1) {
+					dev_info(&octnet_pci_device->dev, "saving pci state of PF1 ...\n");
+					pci_save_state(octboot_net_device[i].pdev_pf1);
+					if (octboot_net_device[i].pci_saved_state_pf1 != NULL)
+						kfree(octboot_net_device[i].pci_saved_state_pf1);
+					octboot_net_device[i].pci_saved_state_pf1 =
+						pci_store_saved_state(octboot_net_device[i].pdev_pf1);
+				}
 			}
 		} else if (octboot_net_device[i].signature_found) {
 			/* earlier valid signature found, but now read invalid signature */
@@ -1937,8 +2036,14 @@ static void __exit octboot_net_exit(void)
 	free_netdev(mdev->ndev);
 	gmdev[i] = NULL;
 	if (octboot_net_device[i].pci_saved_state != NULL) {
-		kfree(octboot_net_device->pci_saved_state);
-		octboot_net_device->pci_saved_state = NULL;
+		kfree(octboot_net_device[i].pci_saved_state);
+		octboot_net_device[i].pci_saved_state = NULL;
+	}
+	if (octboot_net_device[i].pdev_pf1) {
+		if (octboot_net_device[i].pci_saved_state_pf1 != NULL) {
+			kfree(octboot_net_device[i].pci_saved_state_pf1);
+			octboot_net_device[i].pci_saved_state_pf1 = NULL;
+		}
 	}
 	}
 }
