@@ -284,10 +284,19 @@ OCTEP_PCI_WIN_WRITE(u8 *wr_addr, u8 *wr_data, u64 addr, u64 val)
 void reset_fw_ready_state(struct pci_dev *pdev)
 {
 	void *hw_addr;
+	int ret;
 	unsigned long start, len;
 	u8 __iomem *pci_win_wr_addr;
 	u8 __iomem *pci_win_wr_data;
 
+	if (atomic_read(&pdev->enable_cnt) == 0) {
+		pr_info("Enable PCIe device in  reset_fw_ready_state\n");
+		ret = pci_enable_device(pdev);
+		if (ret) {
+			pr_err("Failed to enable PCI device 0x%x in reset_fw_ready_state\n", ret);
+			return;
+		}
+	}
 
 	start = pci_resource_start(pdev, 0);
 	len = pci_resource_len(pdev, 0);
