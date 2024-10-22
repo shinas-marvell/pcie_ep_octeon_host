@@ -655,6 +655,7 @@ int octep_vf_reset_prepare(struct pci_dev *pdev)
 
 	dev_info(&pdev->dev, "Start VF reset prepare ...\n");
 	cancel_delayed_work_sync(&oct->hb_task);
+	cancel_delayed_work_sync(&oct->iface_stats_task);
 
 	clear_bit(OCTEP_VF_DEV_STATE_OPEN, &oct->state);
 	smp_mb__after_atomic();
@@ -936,6 +937,13 @@ static void octep_vf_get_stats64(struct net_device *netdev,
 	stats->tx_bytes = tx_bytes;
 	stats->rx_packets = rx_packets;
 	stats->rx_bytes = rx_bytes;
+
+	stats->multicast = oct->iface_rx_stats.mcast_pkts;
+	stats->rx_errors = oct->iface_rx_stats.err_pkts;
+	stats->rx_dropped = oct->iface_rx_stats.dropped_pkts_fifo_full +
+		oct->iface_rx_stats.err_pkts;
+	stats->rx_missed_errors = oct->iface_rx_stats.dropped_pkts_fifo_full;
+	stats->tx_dropped = oct->iface_tx_stats.dropped;
 	clear_bit(OCTEP_VF_DEV_STATE_READ_STATS, &oct->state);
 }
 
@@ -1188,6 +1196,25 @@ int octep_vf_get_mac_addr(struct octep_vf_device *oct, u8 *addr)
 }
 
 /**
+ * octep_vf_iface_stats_task - work queue task to fetch iface stats
+ *
+ * @work: pointer to iface_stats work_struct
+ *
+ * Fetch and fill iface stats periodically
+ *
+ **/
+static void octep_vf_iface_stats_task(struct work_struct *work)
+{
+	struct octep_vf_device *oct = container_of(work, struct octep_vf_device,
+						   iface_stats_task.work);
+
+	octep_vf_get_if_stats(oct);
+	queue_delayed_work(octep_vf_wq, &oct->iface_stats_task,
+			   msecs_to_jiffies(OCTEP_VF_IFACE_POLL_MS));
+	return;
+}
+
+/**
  * octep_vf_probe() - Octeon PCI device probe handler.
  *
  * @pdev: PCI device structure.
@@ -1305,8 +1332,13 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	INIT_DELAYED_WORK(&octep_vf_dev->hb_task, octep_vf_hb_timeout_task);
 	queue_delayed_work(octep_vf_wq, &octep_vf_dev->hb_task,
 			   msecs_to_jiffies(OCTEP_DEFAULT_VF_HB_INTERVAL));
+	
+	INIT_DELAYED_WORK(&octep_vf_dev->iface_stats_task, octep_vf_iface_stats_task);
+	queue_delayed_work(octep_vf_wq, &octep_vf_dev->iface_stats_task,
+			   msecs_to_jiffies(OCTEP_VF_IFACE_POLL_MS));
 
 	dev_info(&pdev->dev, "Device probe successful\n");
+
 	return 0;
 
 err_register_dev:
@@ -1343,6 +1375,7 @@ static void octep_vf_remove(struct pci_dev *pdev)
 		return;
 
 	cancel_delayed_work_sync(&oct->hb_task);
+	cancel_delayed_work_sync(&oct->iface_stats_task);
 	octep_vf_mbox_dev_remove(oct);
 	cancel_work_sync(&oct->tx_timeout_task);
 	netdev = oct->netdev;

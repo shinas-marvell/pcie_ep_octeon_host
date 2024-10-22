@@ -40,6 +40,8 @@
 #define UINT64_MAX (u64)(~((u64) 0))        /* 0xFFFFFFFFFFFFFFFF */
 #endif
 
+#define OCTEP_VF_IFACE_POLL_MS	(100)
+
 /* PCI address space mapping information.
  * Each of the 3 address spaces given by BAR0, BAR2 and BAR4 of
  * Octeon gets mapped to different physical address spaces in
@@ -299,8 +301,12 @@ struct octep_vf_device {
 
 	/* firmware info */
 	struct octep_vf_fw_info fw_info;
+
 	/* Task to check PF/PCIe device state */
 	struct delayed_work hb_task;
+
+	/* Task to fetch iface stats */
+	struct delayed_work iface_stats_task;
 };
 
 static inline u16 OCTEP_VF_MAJOR_REV(struct octep_vf_device *oct)
