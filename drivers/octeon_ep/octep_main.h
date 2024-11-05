@@ -56,7 +56,7 @@
 #define  IQ_INSTR_PENDING(iq)  ((iq->host_write_index - iq->flush_index) & iq->ring_size_mask)
 #define  IQ_INSTR_SPACE(iq)    (iq->max_count - IQ_INSTR_PENDING(iq))
 
-#define OCTEP_IFACE_POLL_MS	(100)
+#define OCTEP_IFACE_POLL_MS	(2000)
 
 #ifndef UINT64_MAX
 #define UINT64_MAX (u64)(~((u64) 0))        /* 0xFFFFFFFFFFFFFFFF */
