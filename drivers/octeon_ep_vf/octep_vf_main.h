@@ -40,7 +40,7 @@
 #define UINT64_MAX (u64)(~((u64) 0))        /* 0xFFFFFFFFFFFFFFFF */
 #endif
 
-#define OCTEP_VF_IFACE_POLL_MS	(500)
+#define OCTEP_VF_IFACE_POLL_MS	(2000)
 
 /* PCI address space mapping information.
  * Each of the 3 address spaces given by BAR0, BAR2 and BAR4 of
