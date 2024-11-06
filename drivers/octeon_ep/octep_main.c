@@ -1410,27 +1410,6 @@ static void octep_intr_poll_task(struct work_struct *work)
 }
 
 /**
- * octep_iface_stats_task - work queue task to fetch iface stats
- *
- * @work: pointer to iface_stats work_struct
- *
- * Fetch and fill iface stats periodically
- *
- **/
-static void octep_iface_stats_task(struct work_struct *work)
-{
-	struct octep_device *oct = container_of(work, struct octep_device,
-						iface_stats_task.work);
-
-	octep_ctrl_net_get_if_stats(oct, OCTEP_CTRL_NET_INVALID_VFID,
-				    &oct->iface_rx_stats,
-				    &oct->iface_tx_stats);
-	queue_delayed_work(octep_wq, &oct->iface_stats_task,
-			   msecs_to_jiffies(OCTEP_IFACE_POLL_MS));
-	return;
-}
-
-/**
  * octep_ctrl_mbox_task - work queue task to process ctrl mbox messages.
  *
  * @work: pointer to mbox work_struct
@@ -1554,7 +1533,6 @@ int octep_device_setup(struct octep_device *oct)
 
 	atomic_set(&oct->hb_miss_cnt, 0);
 	INIT_DELAYED_WORK(&oct->hb_task, octep_hb_timeout_task);
-	INIT_DELAYED_WORK(&oct->iface_stats_task, octep_iface_stats_task);
 
 	return 0;
 
@@ -1584,7 +1562,6 @@ static void octep_device_cleanup(struct octep_device *oct)
 	dev_info(&oct->pdev->dev, "Cleaning up Octeon Device ...\n");
 	cancel_all_tasks(oct);
 	cancel_delayed_work_sync(&oct->hb_task);
-	cancel_delayed_work_sync(&oct->iface_stats_task);
 
 	oct->hw_ops.soft_reset(oct);
 	for (i = 0; i < OCTEP_MMIO_REGIONS; i++) {
@@ -1721,9 +1698,6 @@ static void octep_dev_setup_task(struct work_struct *work)
 		return;
 	}
 	atomic_set(&oct->status, OCTEP_DEV_STATUS_READY);
-
-	queue_delayed_work(octep_wq, &oct->iface_stats_task,
-			   msecs_to_jiffies(OCTEP_IFACE_POLL_MS));
 	dev_info(&oct->pdev->dev, "Device setup successful\n");
 }
 
@@ -1952,7 +1926,6 @@ static int octep_reset_prepare(struct pci_dev *pdev)
 
 	dev_info(&pdev->dev, "A Start octep_reset_prepare ...\n");
 
-	cancel_delayed_work_sync(&oct->iface_stats_task);
 	if (oct->poll_non_ioq_intr) {
 		cancel_delayed_work_sync(&oct->intr_poll_task);
 		oct->poll_non_ioq_intr = false;

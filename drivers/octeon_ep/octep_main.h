@@ -56,8 +56,6 @@
 #define  IQ_INSTR_PENDING(iq)  ((iq->host_write_index - iq->flush_index) & iq->ring_size_mask)
 #define  IQ_INSTR_SPACE(iq)    (iq->max_count - IQ_INSTR_PENDING(iq))
 
-#define OCTEP_IFACE_POLL_MS	(2000)
-
 #ifndef UINT64_MAX
 #define UINT64_MAX (u64)(~((u64) 0))        /* 0xFFFFFFFFFFFFFFFF */
 #endif
@@ -346,12 +344,8 @@ struct octep_device {
 	atomic_t hb_miss_cnt;
 	/* Task to reset device on heartbeat miss */
 	struct delayed_work hb_task;
-
 	/* Device state */
 	unsigned long state;
-
-	/* Task to fetch iface stats */
-	struct delayed_work iface_stats_task;
 };
 
 static inline u16 OCTEP_MAJOR_REV(struct octep_device *oct)
