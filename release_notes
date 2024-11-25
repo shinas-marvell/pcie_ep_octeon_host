@@ -14,7 +14,14 @@ Known Issues
 Change Logs
 -----------
 
-v24.09
+v24.11
+~~~~~
+- octeon_ep_vf: add null checks oq/iq
+- octboot_net: enable I/O and memory
+- octeon_ep: reset firmware ready status
+- octboot_net: reset the firmware ready
+
+v24.09, v24.10
 ~~~~~
 - octeon_ep: Add complete check in interrupt handler to avoid NULL pointer dereference issue.
 - octeon_ep: Add check to avoid calling napi handlers when napi is NULL.
