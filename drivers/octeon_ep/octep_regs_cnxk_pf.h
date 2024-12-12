@@ -396,15 +396,15 @@
 #define CNXK_SDP_EPF_OEI_RINT_DATA_BIT_MBOX	BIT_ULL(0)
 /* bit 1 for firmware heartbeat interrupt */
 #define CNXK_SDP_EPF_OEI_RINT_DATA_BIT_HBEAT	BIT_ULL(1)
-
-#define FW_STATUS_DOWNING      0ULL
-#define FW_STATUS_READY 1ULL
 #define FW_STATUS_RUNNING      2ULL
-#define CNXK_PEMX_PFX_CSX_PFCFGX(pem, pf, offset)      ((0x8e0000008000 | (uint64_t)pem << 36 \
-						| pf << 18 \
-						| ((offset >> 16) & 1) << 16 \
-						| (offset >> 3) << 3) \
-						+ (((offset >> 2) & 1) << 2))
+#define CNXK_PEMX_PFX_CSX_PFCFGX(pem, pf, offset)      ({ typeof(offset) _off = (offset); \
+							  ((0x8e0000008000 | \
+							    (uint64_t)(pem) << 36 \
+							    | (pf) << 18 \
+							    | ((_off >> 16) & 1) << 16 \
+							    | (_off >> 3) << 3) \
+							   + (((_off >> 2) & 1) << 2)); \
+							})
 
 /* Register defines for use with CNXK_PEMX_PFX_CSX_PFCFGX */
 #define CNXK_PCIEEP_VSECST_CTL  0x418

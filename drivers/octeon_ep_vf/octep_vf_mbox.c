@@ -10,17 +10,13 @@
 #include "octep_vf_config.h"
 #include "octep_vf_main.h"
 
-/*
- * When a new command is implemented, the below table should be updated
+/* When a new command is implemented, the below table should be updated
  * with new command and it's version info.
  */
-
 static u32 pfvf_cmd_versions[OCTEP_PFVF_MBOX_CMD_MAX] = {
 	[0 ... OCTEP_PFVF_MBOX_CMD_DEV_REMOVE] = OCTEP_PFVF_MBOX_VERSION_V1,
 	[OCTEP_PFVF_MBOX_CMD_GET_FW_INFO ... OCTEP_PFVF_MBOX_NOTIF_LINK_STATUS] =
-		OCTEP_PFVF_MBOX_VERSION_V2,
-	[OCTEP_PFVF_MBOX_NOTIF_PF_FLR] =
-		OCTEP_PFVF_MBOX_VERSION_V3
+		OCTEP_PFVF_MBOX_VERSION_V2
 };
 
 int octep_vf_setup_mbox(struct octep_vf_device *oct)
@@ -90,10 +86,8 @@ void octep_vf_mbox_work(struct work_struct *work)
 	link_info = &oct->link_info;
 	mbox = oct->mbox;
 	pf_vf_data = readq(mbox->mbox_read_reg);
-	if (unlikely(pf_vf_data == 0xFFFFFFFFFFFFFFFFU))
-		return;
 
-	notif = (union octep_pfvf_mbox_word *) &pf_vf_data;
+	notif = (union octep_pfvf_mbox_word *)&pf_vf_data;
 
 	switch (notif->s.opcode) {
 	case OCTEP_PFVF_MBOX_NOTIF_LINK_STATUS:
@@ -107,21 +101,11 @@ void octep_vf_mbox_work(struct work_struct *work)
 			dev_info(&oct->pdev->dev, "netif_carrier_off\n");
 		}
 		break;
-	case OCTEP_PFVF_MBOX_NOTIF_PF_FLR:
-		dev_info(&oct->pdev->dev, "Received PF FLR notification octep_vf_reset_prepare val:%llx\n", pf_vf_data);
-		octep_vf_reset_prepare(oct->pdev);
-		notif->s.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
-		writeq(pf_vf_data, mbox->mbox_read_reg);
-		pf_vf_data = readq(mbox->mbox_read_reg);
-		dev_info(&oct->pdev->dev, "Send ACK to PF FLR notification octep_vf_reset_prepare val:%llx\n", pf_vf_data);
-		break;
 	default:
 		dev_err(&oct->pdev->dev,
 			"Received unsupported notif %d\n", notif->s.opcode);
 		break;
 	}
-
-	return;
 }
 
 static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct,
@@ -130,7 +114,7 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct,
 {
 	struct octep_vf_mbox *mbox = oct->mbox;
 	u64 reg_val = 0ull;
-	int count = 0;
+	int count;
 
 	if (!mbox)
 		return OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP;
@@ -145,10 +129,6 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct,
 	for (count = 0; count < OCTEP_PFVF_MBOX_TIMEOUT_WAIT_COUNT; count++) {
 		usleep_range(1000, 1500);
 		reg_val = readq(mbox->mbox_write_reg);
-		if (unlikely(reg_val == 0xFFFFFFFFFFFFFFFFU)) {
-			dev_err(&oct->pdev->dev, "mbox send command err\n");
-			return OCTEP_PFVF_MBOX_CMD_STATUS_ERR;
-		}
 		if (reg_val != cmd.u64) {
 			rsp->u64 = reg_val;
 			break;

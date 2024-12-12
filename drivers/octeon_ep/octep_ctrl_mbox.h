@@ -50,18 +50,18 @@
  * |===========================================|
  */
 
-#define OCTEP_CTRL_MBOX_MAGIC_NUMBER		0xdeaddeadbeefbeefull
+#define OCTEP_CTRL_MBOX_MAGIC_NUMBER			0xdeaddeadbeefbeefull
 
 /* Valid request message */
-#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_REQ	BIT(0)
+#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_REQ		BIT(0)
 /* Valid response message */
-#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_RESP	BIT(1)
+#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_RESP		BIT(1)
 /* Valid notification, no response required */
-#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_NOTIFY	BIT(2)
+#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_NOTIFY		BIT(2)
 /* Valid custom message */
-#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_CUSTOM	BIT(3)
+#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_CUSTOM		BIT(3)
 
-#define OCTEP_CTRL_MBOX_MSG_DESC_MAX		4
+#define OCTEP_CTRL_MBOX_MSG_DESC_MAX			4
 
 enum octep_ctrl_mbox_status {
 	OCTEP_CTRL_MBOX_STATUS_INVALID = 0,

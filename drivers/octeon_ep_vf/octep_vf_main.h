@@ -15,9 +15,8 @@
 #define OCTEP_VF_DRV_NAME	"octeon_ep_vf"
 #define OCTEP_VF_DRV_STRING	"Marvell Octeon EndPoint NIC VF Driver"
 
-#define  OCTEP_PCI_DEVICE_ID_CN93_VF    0xB203
-#define  OCTEP_PCI_DEVICE_ID_CNF95O_VF  0xB603
-#define  OCTEP_PCI_DEVICE_ID_CNF95N_VF  0xB403
+#define  OCTEP_PCI_DEVICE_ID_CN93_VF   0xB203    //93xx VF
+#define  OCTEP_PCI_DEVICE_ID_CNF95N_VF 0xB403    //95N VF
 #define  OCTEP_PCI_DEVICE_ID_CN98_VF	0xB103
 #define  OCTEP_PCI_DEVICE_ID_CN10KA_VF  0xB903
 #define  OCTEP_PCI_DEVICE_ID_CNF10KA_VF 0xBA03
@@ -33,12 +32,13 @@
 #define  OCTEP_VF_IQ_INTR_RESEND_BIT  59
 #define  OCTEP_VF_OQ_INTR_RESEND_BIT  59
 
-#define  IQ_INSTR_PENDING(iq)  ((iq->host_write_index - iq->flush_index) & iq->ring_size_mask)
-#define  IQ_INSTR_SPACE(iq)    (iq->max_count - IQ_INSTR_PENDING(iq))
-
-#ifndef UINT64_MAX
-#define UINT64_MAX (u64)(~((u64) 0))        /* 0xFFFFFFFFFFFFFFFF */
-#endif
+#define  IQ_INSTR_PENDING(iq)  ({ typeof(iq) iq__ = (iq); \
+				  ((iq__)->host_write_index - (iq__)->flush_index) & \
+				  (iq__)->ring_size_mask; \
+				})
+#define  IQ_INSTR_SPACE(iq)    ({ typeof(iq) iq_ = (iq); \
+				  (iq_)->max_count - IQ_INSTR_PENDING(iq_); \
+				})
 
 /* PCI address space mapping information.
  * Each of the 3 address spaces given by BAR0, BAR2 and BAR4 of
@@ -55,7 +55,7 @@ struct octep_vf_mmio {
 
 struct octep_vf_hw_ops {
 	void (*setup_iq_regs)(struct octep_vf_device *oct, int q);
-	int (*setup_oq_regs)(struct octep_vf_device *oct, int q);
+	void (*setup_oq_regs)(struct octep_vf_device *oct, int q);
 	void (*setup_mbox_regs)(struct octep_vf_device *oct, int mbox);
 
 	irqreturn_t (*non_ioq_intr_handler)(void *ioq_vector);
@@ -74,7 +74,6 @@ struct octep_vf_hw_ops {
 	void (*disable_oq)(struct octep_vf_device *oct, int q);
 	void (*reset_io_queues)(struct octep_vf_device *oct);
 	void (*dump_registers)(struct octep_vf_device *oct);
-	void (*dump_OQ_registers)(struct octep_vf_device *oct, int q);
 };
 
 /* Octeon mailbox data */
@@ -203,13 +202,6 @@ struct octep_vf_iface_rxtx_stats {
 	struct octep_vf_iface_tx_stats iface_tx_stats;
 };
 
-/* Device state */
-enum octep_vf_dev_state {
-	OCTEP_VF_DEV_STATE_OPEN,
-	OCTEP_VF_DEV_STATE_READ_STATS,
-	OCTEP_VF_DEV_STATE_DOWN_IN_PROGRESS,
-};
-
 struct octep_vf_fw_info {
 	/* pkind value to be used in every Tx hardware descriptor */
 	u8 pkind;
@@ -220,7 +212,6 @@ struct octep_vf_fw_info {
 	/* supported tx offloads OCTEP_VF_TX_OFFLOAD_* */
 	u16 tx_ol_flags;
 };
-
 
 /* The Octeon device specific private data structure.
  * Each Octeon device has this structure to represent all its components.
@@ -291,16 +282,11 @@ struct octep_vf_device {
 	/* offset for iface stats */
 	u32 ctrl_mbox_ifstats_offset;
 
-	/* Device state */
-	unsigned long state;
-
 	/* Negotiated Mbox version */
 	u32 mbox_neg_ver;
 
 	/* firmware info */
 	struct octep_vf_fw_info fw_info;
-	/* Task to check PF/PCIe device state */
-	struct delayed_work hb_task;
 };
 
 static inline u16 OCTEP_VF_MAJOR_REV(struct octep_vf_device *oct)
@@ -345,5 +331,4 @@ void octep_vf_set_ethtool_ops(struct net_device *netdev);
 int octep_vf_get_link_info(struct octep_vf_device *oct);
 int octep_vf_get_if_stats(struct octep_vf_device *oct);
 void octep_vf_mbox_work(struct work_struct *work);
-int octep_vf_reset_prepare(struct pci_dev *pdev);
 #endif /* _OCTEP_VF_MAIN_H_ */

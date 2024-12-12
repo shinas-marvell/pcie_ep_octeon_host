@@ -125,20 +125,20 @@
 	(CNXK_VF_SDP_R_OUT_BYTE_CNT_START + ((ring) * CNXK_VF_RING_OFFSET))
 
 /*------------------ R_OUT Masks ----------------*/
-#define    CNXK_VF_R_OUT_INT_LEVELS_BMODE            (1ULL << 63)
+#define    CNXK_VF_R_OUT_INT_LEVELS_BMODE            BIT_ULL(63)
 #define    CNXK_VF_R_OUT_INT_LEVELS_TIMET            (32)
 
-#define    CNXK_VF_R_OUT_CTL_IDLE                    (1ULL << 40)
-#define    CNXK_VF_R_OUT_CTL_ES_I                    (1ULL << 34)
-#define    CNXK_VF_R_OUT_CTL_NSR_I                   (1ULL << 33)
-#define    CNXK_VF_R_OUT_CTL_ROR_I                   (1ULL << 32)
-#define    CNXK_VF_R_OUT_CTL_ES_D                    (1ULL << 30)
-#define    CNXK_VF_R_OUT_CTL_NSR_D                   (1ULL << 29)
-#define    CNXK_VF_R_OUT_CTL_ROR_D                   (1ULL << 28)
-#define    CNXK_VF_R_OUT_CTL_ES_P                    (1ULL << 26)
-#define    CNXK_VF_R_OUT_CTL_NSR_P                   (1ULL << 25)
-#define    CNXK_VF_R_OUT_CTL_ROR_P                   (1ULL << 24)
-#define    CNXK_VF_R_OUT_CTL_IMODE                   (1ULL << 23)
+#define    CNXK_VF_R_OUT_CTL_IDLE                    BIT_ULL(40)
+#define    CNXK_VF_R_OUT_CTL_ES_I                    BIT_ULL(34)
+#define    CNXK_VF_R_OUT_CTL_NSR_I                   BIT_ULL(33)
+#define    CNXK_VF_R_OUT_CTL_ROR_I                   BIT_ULL(32)
+#define    CNXK_VF_R_OUT_CTL_ES_D                    BIT_ULL(30)
+#define    CNXK_VF_R_OUT_CTL_NSR_D                   BIT_ULL(29)
+#define    CNXK_VF_R_OUT_CTL_ROR_D                   BIT_ULL(28)
+#define    CNXK_VF_R_OUT_CTL_ES_P                    BIT_ULL(26)
+#define    CNXK_VF_R_OUT_CTL_NSR_P                   BIT_ULL(25)
+#define    CNXK_VF_R_OUT_CTL_ROR_P                   BIT_ULL(24)
+#define    CNXK_VF_R_OUT_CTL_IMODE                   BIT_ULL(23)
 
 /* ##################### Mail Box Registers ########################## */
 /* SDP PF to VF Mailbox Data Register */
@@ -148,8 +148,8 @@
 /* SDP VF to PF Mailbox Data Register */
 #define    CNXK_VF_SDP_R_MBOX_VF_PF_DATA_START    0x10230
 
-#define    CNXK_VF_SDP_R_MBOX_PF_VF_INT_ENAB         (1ULL << 1)
-#define    CNXK_VF_SDP_R_MBOX_PF_VF_INT_STATUS       (1ULL << 0)
+#define    CNXK_VF_SDP_R_MBOX_PF_VF_INT_ENAB         BIT_ULL(1)
+#define    CNXK_VF_SDP_R_MBOX_PF_VF_INT_STATUS       BIT_ULL(0)
 
 #define    CNXK_VF_SDP_R_MBOX_PF_VF_DATA(ring)          \
 	(CNXK_VF_SDP_R_MBOX_PF_VF_DATA_START + ((ring) * CNXK_VF_RING_OFFSET))

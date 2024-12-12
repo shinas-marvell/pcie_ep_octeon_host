@@ -13,16 +13,16 @@
 #include <linux/etherdevice.h>
 #include <linux/rtnetlink.h>
 #include <linux/vmalloc.h>
+#include <net/netdev_queues.h>
 
-#include "octep_vf_compat.h"
 #include "octep_vf_config.h"
 #include "octep_vf_main.h"
 
 struct workqueue_struct *octep_vf_wq;
+
 /* Supported Devices */
 static const struct pci_device_id octep_vf_pci_id_tbl[] = {
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CN93_VF)},
-	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CNF95O_VF)},
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CNF95N_VF)},
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CN98_VF)},
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CN10KA_VF)},
@@ -288,39 +288,6 @@ static void octep_vf_clean_irqs(struct octep_vf_device *oct)
 }
 
 /**
- * octep_vf_update_pkt() - Update IQ/OQ IN/OUT_CNT registers.
- *
- * @iq: Octeon Tx queue data structure.
- * @oq: Octeon Rx queue data structure.
- */
-
-static void octep_vf_update_pkt(struct octep_vf_iq *iq, struct octep_vf_oq *oq)
-{
-	u32 pkts_pend = READ_ONCE(oq->pkts_pending);
-	u32 last_pkt_count = READ_ONCE(oq->last_pkt_count);
-	u32 pkts_processed = READ_ONCE(iq->pkts_processed);
-	u32 pkt_in_done = READ_ONCE(iq->pkt_in_done);
-
-	if (oq->suspend == true)
-		return;
-
-	netdev_dbg(iq->netdev, "enabling intr for Q-%u\n", iq->q_no);
-	if (pkts_processed) {
-		writel(pkts_processed, iq->inst_cnt_reg);
-		readl(iq->inst_cnt_reg);
-		WRITE_ONCE(iq->pkt_in_done, (pkt_in_done - pkts_processed));
-		WRITE_ONCE(iq->pkts_processed, 0);
-	}
-	if (last_pkt_count - pkts_pend) {
-		writel(last_pkt_count - pkts_pend, oq->pkts_sent_reg);
-		readl(oq->pkts_sent_reg);
-		WRITE_ONCE(oq->last_pkt_count, pkts_pend);
-	}
-	/* Flush the previous wrties before writing to RESEND bit */
-	smp_wmb();
-}
-
-/**
  * octep_vf_enable_ioq_irq() - Enable MSI-x interrupt of a Tx/Rx queue.
  *
  * @iq: Octeon Tx queue data structure.
@@ -328,6 +295,21 @@ static void octep_vf_update_pkt(struct octep_vf_iq *iq, struct octep_vf_oq *oq)
  */
 static void octep_vf_enable_ioq_irq(struct octep_vf_iq *iq, struct octep_vf_oq *oq)
 {
+	u32 pkts_pend = oq->pkts_pending;
+
+	netdev_dbg(iq->netdev, "enabling intr for Q-%u\n", iq->q_no);
+	if (iq->pkts_processed) {
+		writel(iq->pkts_processed, iq->inst_cnt_reg);
+		iq->pkt_in_done -= iq->pkts_processed;
+		iq->pkts_processed = 0;
+	}
+	if (oq->last_pkt_count - pkts_pend) {
+		writel(oq->last_pkt_count - pkts_pend, oq->pkts_sent_reg);
+		oq->last_pkt_count = pkts_pend;
+	}
+
+	/* Flush the previous wrties before writing to RESEND bit */
+	smp_wmb();
 	writeq(1UL << OCTEP_VF_OQ_INTR_RESEND_BIT, oq->pkts_sent_reg);
 	writeq(1UL << OCTEP_VF_IQ_INTR_RESEND_BIT, iq->inst_cnt_reg);
 }
@@ -342,21 +324,10 @@ static int octep_vf_napi_poll(struct napi_struct *napi, int budget)
 {
 	struct octep_vf_ioq_vector *ioq_vector =
 		container_of(napi, struct octep_vf_ioq_vector, napi);
-	struct octep_vf_oq *oq = ioq_vector->oq;
 	u32 tx_pending, rx_done;
 
-	if (oq->suspend == true) {
-		napi_complete(napi);
-		return (budget - 1);
-	}
-
-	tx_pending = octep_vf_iq_process_completions(ioq_vector->iq, budget);
+	tx_pending = octep_vf_iq_process_completions(ioq_vector->iq, 64);
 	rx_done = octep_vf_oq_process_rx(ioq_vector->oq, budget);
-
-	if (oq->suspend == true) {
-		napi_complete(napi);
-		return (budget - 1);
-	}
 
 	/* need more polling if tx completion processing is still pending or
 	 * processed at least 'budget' number of rx packets.
@@ -364,9 +335,9 @@ static int octep_vf_napi_poll(struct napi_struct *napi, int budget)
 	if (tx_pending || rx_done >= budget)
 		return budget;
 
-	octep_vf_update_pkt(ioq_vector->iq, ioq_vector->oq);
-	napi_complete_done(napi, rx_done);
-	octep_vf_enable_ioq_irq(ioq_vector->iq, ioq_vector->oq);
+	if (likely(napi_complete_done(napi, rx_done)))
+		octep_vf_enable_ioq_irq(ioq_vector->iq, ioq_vector->oq);
+
 	return rx_done;
 }
 
@@ -381,11 +352,7 @@ static void octep_vf_napi_add(struct octep_vf_device *oct)
 
 	for (i = 0; i < oct->num_oqs; i++) {
 		netdev_dbg(oct->netdev, "Adding NAPI on Q-%d\n", i);
-#if NAPI_ADD_HAS_BUDGET_ARG
-		netif_napi_add(oct->netdev, &oct->ioq_vector[i]->napi, octep_vf_napi_poll, 64);
-#else
 		netif_napi_add(oct->netdev, &oct->ioq_vector[i]->napi, octep_vf_napi_poll);
-#endif
 		oct->oq[i]->napi = &oct->ioq_vector[i]->napi;
 	}
 }
@@ -474,40 +441,6 @@ static void octep_vf_set_link_status(struct octep_vf_device *oct, bool up)
 }
 
 /**
- * octep_vf_hb_timeout_task - work queue task to check PF state.
- *
- * @work: pointer to hb work_struct
- *
- * Check for PF state by reading PF VF data Mailbox register.
- * if the read value is all F's means PF/PCIe is in reset state,
- * Then trun off netif carrier.
- *
- **/
-static void octep_vf_hb_timeout_task(struct work_struct *work)
-{
-	struct octep_vf_device *oct = container_of(work, struct octep_vf_device,
-						hb_task.work);
-	struct octep_vf_mbox *mbox = NULL;
-	u64 pf_vf_data;
-
-	mbox = oct->mbox;
-        pf_vf_data = readq(mbox->mbox_read_reg);
-	if (pf_vf_data == 0xFFFFFFFFFFFFFFFFU) {
-		dev_info(&oct->pdev->dev, "VF interface :%s. carrier off\n",
-			oct->netdev->name);
-		netif_carrier_off(oct->netdev);
-		return;
-	}
-	queue_delayed_work(octep_vf_wq, &oct->hb_task,
-			   msecs_to_jiffies(OCTEP_DEFAULT_VF_HB_INTERVAL));
-}
-
-static bool octep_vf_drv_down_in_progress(struct octep_vf_device *oct)
-{
-	return test_bit(OCTEP_VF_DEV_STATE_DOWN_IN_PROGRESS, &oct->state);
-}
-
-/**
  * octep_vf_open() - start the octeon network device.
  *
  * @netdev: pointer to kernel network device.
@@ -524,10 +457,6 @@ static int octep_vf_open(struct net_device *netdev)
 	int err, ret;
 
 	netdev_info(netdev, "Starting netdev ...\n");
-
-	while (octep_vf_drv_down_in_progress(oct))
-		msleep(20);
-
 	netif_carrier_off(netdev);
 
 	oct->hw_ops.reset_io_queues(oct);
@@ -556,21 +485,17 @@ static int octep_vf_open(struct net_device *netdev)
 	if (!ret)
 		octep_vf_set_link_status(oct, true);
 
-	/* Enable Octeon device interrupts */
-	oct->hw_ops.enable_interrupts(oct);
-
 	/* Enable the input and output queues for this Octeon device */
 	oct->hw_ops.enable_io_queues(oct);
+
+	/* Enable Octeon device interrupts */
+	oct->hw_ops.enable_interrupts(oct);
 
 	octep_vf_oq_dbell_init(oct);
 
 	ret = octep_vf_get_link_status(oct);
 	if (ret)
 		octep_vf_link_up(netdev);
-
-	set_bit(OCTEP_VF_DEV_STATE_OPEN, &oct->state);
-
-	netdev_info(netdev, "Started netdev ...\n");
 
 	return 0;
 
@@ -586,11 +511,6 @@ setup_iq_err:
 	return -1;
 }
 
-static bool octep_vf_drv_busy(struct octep_vf_device *oct)
-{
-	return test_bit(OCTEP_VF_DEV_STATE_READ_STATS, &oct->state);
-}
-
 /**
  * octep_vf_stop() - stop the octeon network device.
  *
@@ -603,23 +523,11 @@ static int octep_vf_stop(struct net_device *netdev)
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
 
+	synchronize_net();
+
 	netdev_info(netdev, "Stopping the device ...\n");
 
-	if (!test_bit(OCTEP_VF_DEV_STATE_OPEN, &oct->state)) {
-		netdev_info(netdev, "Already Stopped the device by FLR\n");
-		return 0;
-	}
-
-	set_bit(OCTEP_VF_DEV_STATE_DOWN_IN_PROGRESS, &oct->state);
-	smp_mb__after_atomic();
-
-	clear_bit(OCTEP_VF_DEV_STATE_OPEN, &oct->state);
-	smp_mb__after_atomic();
-	while (octep_vf_drv_busy(oct))
-		msleep(20);
-
 	/* Stop Tx from stack */
-	netif_tx_stop_all_queues(netdev);
 	netif_carrier_off(netdev);
 	netif_tx_disable(netdev);
 
@@ -640,46 +548,7 @@ static int octep_vf_stop(struct net_device *netdev)
 	oct->hw_ops.reset_io_queues(oct);
 	octep_vf_free_oqs(oct);
 	octep_vf_free_iqs(oct);
-
-	clear_bit(OCTEP_VF_DEV_STATE_DOWN_IN_PROGRESS, &oct->state);
-	smp_mb__after_atomic();
-
 	netdev_info(netdev, "Device stopped !!\n");
-	return 0;
-}
-
-int octep_vf_reset_prepare(struct pci_dev *pdev)
-{
-	struct octep_vf_device *oct = pci_get_drvdata(pdev);
-	struct net_device *netdev = oct->netdev;
-
-	dev_info(&pdev->dev, "Start VF reset prepare ...\n");
-	cancel_delayed_work_sync(&oct->hb_task);
-
-	clear_bit(OCTEP_VF_DEV_STATE_OPEN, &oct->state);
-	smp_mb__after_atomic();
-	while (octep_vf_drv_busy(oct))
-		msleep(20);
-
-	/* Stop Tx from stack */
-	netif_tx_stop_all_queues(netdev);
-	netif_carrier_off(netdev);
-	netif_tx_disable(netdev);
-
-	oct->hw_ops.disable_interrupts(oct);
-	octep_vf_napi_disable(oct);
-	octep_vf_napi_delete(oct);
-
-	octep_vf_clean_irqs(oct);
-	octep_vf_clean_iqs(oct);
-
-	oct->hw_ops.disable_io_queues(oct);
-	oct->hw_ops.reset_io_queues(oct);
-	octep_vf_free_oqs(oct);
-	octep_vf_free_iqs(oct);
-	if (netdev->reg_state == NETREG_REGISTERED)
-		unregister_netdev(netdev);
-	dev_info(&pdev->dev, "Done VF reset prepare ...\n");
 	return 0;
 }
 
@@ -693,20 +562,23 @@ int octep_vf_reset_prepare(struct pci_dev *pdev)
  */
 static int octep_vf_iq_full_check(struct octep_vf_iq *iq)
 {
-	if (likely((IQ_INSTR_SPACE(iq)) >
-		   OCTEP_VF_WAKE_QUEUE_THRESHOLD))
-		return 0;
+	int ret;
 
-	/* Stop the queue if unable to send */
-	netif_stop_subqueue(iq->netdev, iq->q_no);
-
-	/* check again and restart the queue, in case NAPI has just freed
-	 * enough Tx ring entries.
-	 */
-	if (unlikely(IQ_INSTR_SPACE(iq) >
-		     OCTEP_VF_WAKE_QUEUE_THRESHOLD)) {
-		netif_start_subqueue(iq->netdev, iq->q_no);
+	ret = netif_subqueue_maybe_stop(iq->netdev, iq->q_no, IQ_INSTR_SPACE(iq),
+					OCTEP_VF_WAKE_QUEUE_THRESHOLD,
+					OCTEP_VF_WAKE_QUEUE_THRESHOLD);
+	switch (ret) {
+	case 0: /* Stopped the queue, since IQ is full */
+		return 1;
+	case -1: /*
+		  * Pending updates in write index from
+		  * iq_process_completion in other cpus
+		  * caused queues to get re-enabled after
+		  * being stopped
+		  */
 		iq->stats.restart_cnt++;
+		fallthrough;
+	case 1: /* Queue left enabled, since IQ is not yet full*/
 		return 0;
 	}
 
@@ -748,10 +620,6 @@ static netdev_tx_t octep_vf_start_xmit(struct sk_buff *skb,
 	}
 
 	iq = oct->iq[q_no];
-	if (octep_vf_iq_full_check(iq)) {
-		iq->stats.tx_busy++;
-		return NETDEV_TX_BUSY;
-	}
 
 	shinfo = skb_shinfo(skb);
 	nr_frags = shinfo->nr_frags;
@@ -765,7 +633,6 @@ static netdev_tx_t octep_vf_start_xmit(struct sk_buff *skb,
 
 	ih = &hw_desc->ih;
 	ih->tlen = skb->len;
-	/* TODO prefill */
 	ih->pkind = oct->fw_info.pkind;
 	ih->fsz = oct->fw_info.fsz;
 	ih->tlen = skb->len + ih->fsz;
@@ -823,33 +690,29 @@ static netdev_tx_t octep_vf_start_xmit(struct sk_buff *skb,
 		} else if (feat & (NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM)) {
 			hw_desc->txm.ol_flags = OCTEP_VF_TX_OFFLOAD_CKSUM;
 		}
-		/* due to ESR txm will be swappeed by hw */
-		hw_desc->txm64[0] = cpu_to_be64(hw_desc->txm64[0]);
+		/* due to ESR txm will be swapped by hw */
+		hw_desc->txm64[0] = (__force u64)cpu_to_be64(hw_desc->txm64[0]);
 	}
+
+	xmit_more = netdev_xmit_more();
 
 	netdev_tx_sent_queue(iq->netdev_q, skb->len);
 
-#if defined(NO_SKB_XMIT_MORE)
-	xmit_more = netdev_xmit_more();
-#else
-	xmit_more = skb->xmit_more;
-#endif
 	skb_tx_timestamp(skb);
 	iq->fill_cnt++;
 	wi++;
 	iq->host_write_index = wi & iq->ring_size_mask;
-	if (xmit_more &&
-	    (IQ_INSTR_PENDING(iq) <
-	     (iq->max_count - OCTEP_VF_WAKE_QUEUE_THRESHOLD)) &&
+
+	/* octep_iq_full_check stops the queue and returns
+	 * true if so, in case the queue has become full
+	 * by inserting current packet. If so, we can
+	 * go ahead and ring doorbell.
+	 */
+	if (!octep_vf_iq_full_check(iq) && xmit_more &&
 	    iq->fill_cnt < iq->fill_threshold)
 		return NETDEV_TX_OK;
 
-	/* Flush the hw descriptors before writing to doorbell */
-	smp_wmb();
-	writel(iq->fill_cnt, iq->doorbell_reg);
-	iq->stats.instr_posted += iq->fill_cnt;
-	iq->fill_cnt = 0;
-	return NETDEV_TX_OK;
+	goto ring_dbell;
 
 dma_map_sg_err:
 	if (si > 0) {
@@ -866,6 +729,12 @@ dma_map_sg_err:
 	tx_buffer->gather = 0;
 dma_map_err:
 	dev_kfree_skb_any(skb);
+ring_dbell:
+	/* Flush the hw descriptors before writing to doorbell */
+	smp_wmb();
+	writel(iq->fill_cnt, iq->doorbell_reg);
+	iq->stats.instr_posted += iq->fill_cnt;
+	iq->fill_cnt = 0;
 	return NETDEV_TX_OK;
 }
 
@@ -877,13 +746,16 @@ int octep_vf_get_if_stats(struct octep_vf_device *oct)
 	memset(&vf_stats, 0, sizeof(struct octep_vf_iface_rxtx_stats));
 	ret = octep_vf_mbox_bulk_read(oct, OCTEP_PFVF_MBOX_CMD_GET_STATS,
 				      (u8 *)&vf_stats, &size);
-	if (!ret) {
-		memcpy(&oct->iface_rx_stats, &vf_stats.iface_rx_stats,
-		       sizeof(struct octep_vf_iface_rx_stats));
-		memcpy(&oct->iface_tx_stats, &vf_stats.iface_tx_stats,
-		       sizeof(struct octep_vf_iface_tx_stats));
-	}
-	return ret;
+
+	if (ret)
+		return ret;
+
+	memcpy(&oct->iface_rx_stats, &vf_stats.iface_rx_stats,
+	       sizeof(struct octep_vf_iface_rx_stats));
+	memcpy(&oct->iface_tx_stats, &vf_stats.iface_tx_stats,
+	       sizeof(struct octep_vf_iface_tx_stats));
+
+	return 0;
 }
 
 int octep_vf_get_link_info(struct octep_vf_device *oct)
@@ -912,13 +784,6 @@ static void octep_vf_get_stats64(struct net_device *netdev,
 	u64 tx_packets, tx_bytes, rx_packets, rx_bytes;
 	int q;
 
-	set_bit(OCTEP_VF_DEV_STATE_READ_STATS, &oct->state);
-	smp_mb__after_atomic();
-	if (!test_bit(OCTEP_VF_DEV_STATE_OPEN, &oct->state)) {
-		clear_bit(OCTEP_VF_DEV_STATE_READ_STATS, &oct->state);
-		return;
-	}
-
 	tx_packets = 0;
 	tx_bytes = 0;
 	rx_packets = 0;
@@ -926,9 +791,6 @@ static void octep_vf_get_stats64(struct net_device *netdev,
 	for (q = 0; q < oct->num_oqs; q++) {
 		struct octep_vf_iq *iq = oct->iq[q];
 		struct octep_vf_oq *oq = oct->oq[q];
-
-		if (!iq || !oq)
-			return;
 
 		tx_packets += iq->stats.instr_completed;
 		tx_bytes += iq->stats.bytes_sent;
@@ -939,7 +801,6 @@ static void octep_vf_get_stats64(struct net_device *netdev,
 	stats->tx_bytes = tx_bytes;
 	stats->rx_packets = rx_packets;
 	stats->rx_bytes = rx_bytes;
-	clear_bit(OCTEP_VF_DEV_STATE_READ_STATS, &oct->state);
 }
 
 /**
@@ -963,6 +824,7 @@ static void octep_vf_tx_timeout_task(struct work_struct *work)
 		octep_vf_open(netdev);
 	}
 	rtnl_unlock();
+	netdev_put(netdev, NULL);
 }
 
 /**
@@ -973,15 +835,12 @@ static void octep_vf_tx_timeout_task(struct work_struct *work)
  *
  * Schedule a work to handle Tx queue timeout.
  */
-#if TX_TIMEOUT_HAS_TXQ_ARG
 static void octep_vf_tx_timeout(struct net_device *netdev, unsigned int txqueue)
-#else
-static void octep_vf_tx_timeout(struct net_device *netdev)
-#endif
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
 
-	queue_work(octep_vf_wq, &oct->tx_timeout_task);
+	netdev_hold(netdev, NULL, GFP_ATOMIC);
+	schedule_work(&oct->tx_timeout_task);
 }
 
 static int octep_vf_set_mac(struct net_device *netdev, void *p)
@@ -998,11 +857,7 @@ static int octep_vf_set_mac(struct net_device *netdev, void *p)
 		return err;
 
 	memcpy(oct->mac_addr, addr->sa_data, ETH_ALEN);
-#if defined(USE_ETHER_ADDR_COPY)
-	ether_addr_copy(netdev->dev_addr, addr->sa_data);
-#else
 	eth_hw_addr_set(netdev, addr->sa_data);
-#endif
 
 	return 0;
 }
@@ -1023,16 +878,6 @@ static int octep_vf_change_mtu(struct net_device *netdev, int new_mtu)
 		netdev->mtu = new_mtu;
 	}
 	return err;
-}
-
-static netdev_features_t octep_vf_fix_features(struct net_device *netdev,
-					       netdev_features_t features)
-{
-	netdev_features_t ret;
-
-	ret = (netdev->hw_features & features);
-
-	return ret;
 }
 
 static int octep_vf_set_features(struct net_device *netdev,
@@ -1076,7 +921,6 @@ static const struct net_device_ops octep_vf_netdev_ops = {
 	.ndo_tx_timeout          = octep_vf_tx_timeout,
 	.ndo_set_mac_address     = octep_vf_set_mac,
 	.ndo_change_mtu          = octep_vf_change_mtu,
-	.ndo_fix_features        = octep_vf_fix_features,
 	.ndo_set_features        = octep_vf_set_features,
 };
 
@@ -1085,8 +929,6 @@ static const char *octep_vf_devid_to_str(struct octep_vf_device *oct)
 	switch (oct->chip_id) {
 	case OCTEP_PCI_DEVICE_ID_CN93_VF:
 		return "CN93XX";
-	case OCTEP_PCI_DEVICE_ID_CNF95O_VF:
-		return "CNF95O";
 	case OCTEP_PCI_DEVICE_ID_CNF95N_VF:
 		return "CNF95N";
 	case OCTEP_PCI_DEVICE_ID_CN10KA_VF:
@@ -1136,7 +978,6 @@ int octep_vf_device_setup(struct octep_vf_device *oct)
 
 	switch (oct->chip_id) {
 	case OCTEP_PCI_DEVICE_ID_CN93_VF:
-	case OCTEP_PCI_DEVICE_ID_CNF95O_VF:
 	case OCTEP_PCI_DEVICE_ID_CNF95N_VF:
 	case OCTEP_PCI_DEVICE_ID_CN98_VF:
 		dev_info(&pdev->dev, "Setting up OCTEON %s VF PASS%d.%d\n",
@@ -1185,7 +1026,7 @@ static void octep_vf_device_cleanup(struct octep_vf_device *oct)
 	oct->conf = NULL;
 }
 
-int octep_vf_get_mac_addr(struct octep_vf_device *oct, u8 *addr)
+static int octep_vf_get_mac_addr(struct octep_vf_device *oct, u8 *addr)
 {
 	return octep_vf_mbox_get_mac_addr(oct, addr);
 }
@@ -1205,6 +1046,7 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct net_device *netdev;
 	int err;
 
+	pr_info("%s: octeon_ep_vf patched version for upstreaming unofficial 0.0", __func__);
 	err = pci_enable_device(pdev);
 	if (err) {
 		dev_err(&pdev->dev, "Failed to enable PCI device\n");
@@ -1214,13 +1056,13 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
 	if (err) {
 		dev_err(&pdev->dev, "Failed to set DMA mask !!\n");
-		goto err_dma_mask;
+		goto disable_pci_device;
 	}
 
 	err = pci_request_mem_regions(pdev, OCTEP_VF_DRV_NAME);
 	if (err) {
 		dev_err(&pdev->dev, "Failed to map PCI memory regions\n");
-		goto err_pci_regions;
+		goto disable_pci_device;
 	}
 
 	pci_set_master(pdev);
@@ -1230,7 +1072,7 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (!netdev) {
 		dev_err(&pdev->dev, "Failed to allocate netdev\n");
 		err = -ENOMEM;
-		goto err_alloc_netdev;
+		goto mem_regions_release;
 	}
 	SET_NETDEV_DEV(netdev, &pdev->dev);
 
@@ -1243,7 +1085,7 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	err = octep_vf_device_setup(octep_vf_dev);
 	if (err) {
 		dev_err(&pdev->dev, "Device setup failed\n");
-		goto err_octep_vf_config;
+		goto netdevice_free;
 	}
 	INIT_WORK(&octep_vf_dev->tx_timeout_task, octep_vf_tx_timeout_task);
 
@@ -1254,19 +1096,19 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (octep_vf_setup_mbox(octep_vf_dev)) {
 		dev_err(&pdev->dev, "VF Mailbox setup failed\n");
 		err = -ENOMEM;
-		goto err_setup_mbox;
+		goto device_cleanup;
 	}
 
 	if (octep_vf_mbox_version_check(octep_vf_dev)) {
 		dev_err(&pdev->dev, "PF VF Mailbox version mismatch\n");
 		err = -EINVAL;
-		goto err_mbox_version;
+		goto delete_mbox;
 	}
 
 	if (octep_vf_mbox_get_fw_info(octep_vf_dev)) {
 		dev_err(&pdev->dev, "unable to get fw info\n");
 		err = -EINVAL;
-		goto err_mbox_version;
+		goto delete_mbox;
 	}
 
 	netdev->hw_features = NETIF_F_SG;
@@ -1282,47 +1124,29 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	if (OCTEP_VF_TX_TSO(octep_vf_dev->fw_info.tx_ol_flags)) {
 		netdev->hw_features |= NETIF_F_TSO;
-#if defined(NO_SET_GSO_API)
 		netif_set_tso_max_size(netdev, netdev->max_mtu);
-#else
-		netif_set_gso_max_size(netdev, netdev->max_mtu);
-#endif
 	}
 
 	netdev->features |= netdev->hw_features;
-
 	octep_vf_get_mac_addr(octep_vf_dev, octep_vf_dev->mac_addr);
-#if defined(USE_ETHER_ADDR_COPY)
-	ether_addr_copy(netdev->dev_addr, octep_vf_dev->mac_addr);
-	ether_addr_copy(netdev->perm_addr, octep_vf_dev->mac_addr);
-#else
 	eth_hw_addr_set(netdev, octep_vf_dev->mac_addr);
-#endif
 	err = register_netdev(netdev);
 	if (err) {
 		dev_err(&pdev->dev, "Failed to register netdev\n");
-		goto err_register_dev;
+		goto delete_mbox;
 	}
-
-	clear_bit(OCTEP_VF_DEV_STATE_OPEN, &octep_vf_dev->state);
-	INIT_DELAYED_WORK(&octep_vf_dev->hb_task, octep_vf_hb_timeout_task);
-	queue_delayed_work(octep_vf_wq, &octep_vf_dev->hb_task,
-			   msecs_to_jiffies(OCTEP_DEFAULT_VF_HB_INTERVAL));
-
 	dev_info(&pdev->dev, "Device probe successful\n");
 	return 0;
 
-err_register_dev:
-err_mbox_version:
+delete_mbox:
 	octep_vf_delete_mbox(octep_vf_dev);
-err_setup_mbox:
+device_cleanup:
 	octep_vf_device_cleanup(octep_vf_dev);
-err_octep_vf_config:
+netdevice_free:
 	free_netdev(netdev);
-err_alloc_netdev:
+mem_regions_release:
 	pci_release_mem_regions(pdev);
-err_pci_regions:
-err_dma_mask:
+disable_pci_device:
 	pci_disable_device(pdev);
 	dev_err(&pdev->dev, "Device probe failed\n");
 	return err;
@@ -1341,11 +1165,9 @@ static void octep_vf_remove(struct pci_dev *pdev)
 	struct octep_vf_device *oct = pci_get_drvdata(pdev);
 	struct net_device *netdev;
 
-	dev_info(&pdev->dev, "octep_vf_remove\n");
 	if (!oct)
 		return;
 
-	cancel_delayed_work_sync(&oct->hb_task);
 	octep_vf_mbox_dev_remove(oct);
 	cancel_work_sync(&oct->tx_timeout_task);
 	netdev = oct->netdev;
@@ -1376,22 +1198,12 @@ static int __init octep_vf_init_module(void)
 
 	pr_info("%s: Loading %s ...\n", OCTEP_VF_DRV_NAME, OCTEP_VF_DRV_STRING);
 
-	/* work queue for all deferred tasks */
-	octep_vf_wq = create_singlethread_workqueue(OCTEP_VF_DRV_NAME);
-	if (!octep_vf_wq) {
-		pr_err("%s: Failed to create common workqueue\n",
-		       OCTEP_VF_DRV_NAME);
-		return -ENOMEM;
-	}
-
 	ret = pci_register_driver(&octep_vf_driver);
 	if (ret < 0) {
 		pr_err("%s: Failed to register PCI driver; err=%d\n",
 		       OCTEP_VF_DRV_NAME, ret);
 		return ret;
 	}
-
-	pr_info("%s: Loaded successfully !\n", OCTEP_VF_DRV_NAME);
 
 	return ret;
 }
@@ -1406,7 +1218,6 @@ static void __exit octep_vf_exit_module(void)
 	pr_info("%s: Unloading ...\n", OCTEP_VF_DRV_NAME);
 
 	pci_unregister_driver(&octep_vf_driver);
-	destroy_workqueue(octep_vf_wq);
 
 	pr_info("%s: Unloading complete\n", OCTEP_VF_DRV_NAME);
 }

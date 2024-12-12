@@ -17,11 +17,27 @@
 #define TX_BUFTYPE_NET_SG        2
 #define NUM_TX_BUFTYPES          3
 
-/* Hardware format for Scatter/Gather list */
+/* Hardware format for Scatter/Gather list
+ *
+ * 63      48|47     32|31     16|15       0
+ * -----------------------------------------
+ * |  Len 0  |  Len 1  |  Len 2  |  Len 3  |
+ * -----------------------------------------
+ * |                Ptr 0                  |
+ * -----------------------------------------
+ * |                Ptr 1                  |
+ * -----------------------------------------
+ * |                Ptr 2                  |
+ * -----------------------------------------
+ * |                Ptr 3                  |
+ * -----------------------------------------
+ */
 struct octep_vf_tx_sglist_desc {
 	u16 len[4];
 	dma_addr_t dma_ptr[4];
-} __packed;
+};
+
+static_assert(sizeof(struct octep_vf_tx_sglist_desc) == 40);
 
 /* Each Scatter/Gather entry sent to hardwar hold four pointers.
  * So, number of entries required is (MAX_SKB_FRAGS + 1)/4, where '+1'
@@ -179,7 +195,9 @@ struct octep_vf_instr_hdr {
 
 	/* Reserved3 */
 	u64 reserved3:1;
-} __packed;
+};
+
+static_assert(sizeof(struct octep_vf_instr_hdr) == 8);
 
 /* Tx offload flags */
 #define OCTEP_VF_TX_OFFLOAD_VLAN_INSERT	BIT(0)
@@ -207,7 +225,6 @@ struct octep_vf_instr_hdr {
 					  OCTEP_VF_TX_OFFLOAD_UDP_TSO))
 
 struct tx_mdata {
-
 	/* offload flags */
 	u16 ol_flags;
 
@@ -222,7 +239,9 @@ struct tx_mdata {
 
 	/* reserved */
 	u64 rsvd2;
-} __packed;
+};
+
+static_assert(sizeof(struct tx_mdata) == 16);
 
 /* 64-byte Tx instruction format.
  * Format of instruction for a 64-byte mode input queue.
@@ -249,7 +268,9 @@ struct octep_vf_tx_desc_hw {
 
 	/* Additional headers available in a 64-byte instruction. */
 	u64 exhdr[4];
-} __packed;
+};
+
+static_assert(sizeof(struct octep_vf_tx_desc_hw) == 64);
 
 #define OCTEP_VF_IQ_DESC_SIZE (sizeof(struct octep_vf_tx_desc_hw))
 #endif /* _OCTEP_VF_TX_H_ */

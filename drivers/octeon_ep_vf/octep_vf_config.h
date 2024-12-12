@@ -13,7 +13,6 @@
 #define OCTEP_VF_64BYTE_INSTR  64
 
 /* Tx Queue: maximum descriptors per ring */
-/* This needs to be a power of 2 */
 #define OCTEP_VF_IQ_MAX_DESCRIPTORS    1024
 /* Minimum input (Tx) requests to be enqueued to ring doorbell */
 #define OCTEP_VF_DB_MIN                8
@@ -75,9 +74,6 @@
 #define CFG_GET_COPROC_TICS_PER_US(cfg)   ((cfg)->core_cfg.coproc_tics_per_us)
 
 #define CFG_GET_IOQ_MSIX(cfg)            ((cfg)->msix_cfg.ioq_msix)
-
-/* PF/PCIe device state check interval in milliseconds */
-#define OCTEP_DEFAULT_VF_HB_INTERVAL            1000
 
 /* Hardware Tx Queue configuration. */
 struct octep_vf_iq_config {

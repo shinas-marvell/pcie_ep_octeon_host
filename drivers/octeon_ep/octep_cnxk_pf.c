@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0
 /* Marvell Octeon EP (EndPoint) Ethernet Driver
  *
  * Copyright (C) 2020 Marvell.
@@ -15,7 +15,7 @@
 
 /* We will support 128 pf's in control mbox */
 #define CTRL_MBOX_MAX_PF	128
-#define CTRL_MBOX_SZ		(size_t)(0x400000 / CTRL_MBOX_MAX_PF)
+#define CTRL_MBOX_SZ		((size_t)(0x400000 / CTRL_MBOX_MAX_PF))
 
 /* Names of Hardware non-queue generic interrupts */
 static char *cnxk_non_ioq_msix_names[] = {
@@ -224,9 +224,9 @@ static void octep_init_config_cnxk_pf(struct octep_device *oct)
 {
 	struct octep_config *conf = oct->conf;
 	struct pci_dev *pdev = oct->pdev;
+	u8 link = 0;
 	u64 val;
 	int pos;
-	u8 link = 0;
 
 	/* Read ring configuration:
 	 * PF ring count, number of VFs and rings per VF supported
@@ -236,7 +236,7 @@ static void octep_init_config_cnxk_pf(struct octep_device *oct)
 	conf->sriov_cfg.max_rings_per_vf = CNXK_SDP_EPF_RINFO_RPVF(val);
 	conf->sriov_cfg.active_rings_per_vf = conf->sriov_cfg.max_rings_per_vf;
 	conf->sriov_cfg.max_vfs = CNXK_SDP_EPF_RINFO_NVFS(val);
-	conf->sriov_cfg.active_vfs = 0;
+	conf->sriov_cfg.active_vfs = conf->sriov_cfg.max_vfs;
 	conf->sriov_cfg.vf_srn = CNXK_SDP_EPF_RINFO_SRN(val);
 
 	val = octep_read_csr64(oct, CNXK_SDP_MAC_PF_RING_CTL(oct->pcie_port));
@@ -277,7 +277,6 @@ static void octep_init_config_cnxk_pf(struct octep_device *oct)
 
 	conf->fw_info.hb_interval = OCTEP_DEFAULT_FW_HB_INTERVAL;
 	conf->fw_info.hb_miss_count = OCTEP_DEFAULT_FW_HB_MISS_COUNT;
-
 }
 
 /* Setup registers for a hardware Tx Queue  */
@@ -328,11 +327,10 @@ static void octep_setup_iq_regs_cnxk_pf(struct octep_device *oct, int iq_no)
 }
 
 /* Setup registers for a hardware Rx Queue  */
-static int octep_setup_oq_regs_cnxk_pf(struct octep_device *oct, int oq_no)
+static void octep_setup_oq_regs_cnxk_pf(struct octep_device *oct, int oq_no)
 {
 	u64 reg_val;
 	u64 oq_ctl = 0ULL;
-	u64 reg_ba_val;
 	u32 time_threshold = 0;
 	struct octep_oq *oq = oct->oq[oq_no];
 
@@ -344,22 +342,6 @@ static int octep_setup_oq_regs_cnxk_pf(struct octep_device *oct, int oq_no)
 		do {
 			reg_val = octep_read_csr64(oct, CNXK_SDP_R_OUT_CONTROL(oq_no));
 		} while (!(reg_val & CNXK_R_OUT_CTL_IDLE));
-	}
-	octep_write_csr64(oct, CNXK_SDP_R_OUT_WMARK(oq_no),  oq->max_count);
-	/* Wait for WMARK to get applied */
-	udelay(10);
-
-	octep_write_csr64(oct, CNXK_SDP_R_OUT_SLIST_BADDR(oq_no), oq->desc_ring_dma);
-	octep_write_csr64(oct, CNXK_SDP_R_OUT_SLIST_RSIZE(oq_no), oq->max_count);
-	reg_ba_val = octep_read_csr64(oct, CNXK_SDP_R_OUT_SLIST_BADDR(oq_no));
-	if (reg_ba_val != oq->desc_ring_dma) {
-		do {
-			if (reg_ba_val == UINT64_MAX)
-				return -1;
-			octep_write_csr64(oct, CNXK_SDP_R_OUT_SLIST_BADDR(oq_no), oq->desc_ring_dma);
-			 octep_write_csr64(oct, CNXK_SDP_R_OUT_SLIST_RSIZE(oq_no), oq->max_count);
-			 reg_ba_val = octep_read_csr64(oct, CNXK_SDP_R_OUT_SLIST_BADDR(oq_no));
-		} while (reg_ba_val != oq->desc_ring_dma);
 	}
 
 	reg_val &= ~(CNXK_R_OUT_CTL_IMODE);
@@ -374,6 +356,10 @@ static int octep_setup_oq_regs_cnxk_pf(struct octep_device *oct, int oq_no)
 	reg_val |= (CNXK_R_OUT_CTL_ES_P);
 
 	octep_write_csr64(oct, CNXK_SDP_R_OUT_CONTROL(oq_no), reg_val);
+	octep_write_csr64(oct, CNXK_SDP_R_OUT_SLIST_BADDR(oq_no),
+			  oq->desc_ring_dma);
+	octep_write_csr64(oct, CNXK_SDP_R_OUT_SLIST_RSIZE(oq_no),
+			  oq->max_count);
 
 	oq_ctl = octep_read_csr64(oct, CNXK_SDP_R_OUT_CONTROL(oq_no));
 
@@ -399,8 +385,6 @@ static int octep_setup_oq_regs_cnxk_pf(struct octep_device *oct, int oq_no)
 	reg_val &= ~0xFFFFFFFFULL;
 	reg_val |= CFG_GET_OQ_WMARK(oct->conf);
 	octep_write_csr64(oct, CNXK_SDP_R_OUT_WMARK(oq_no), reg_val);
-
-	return 0;
 }
 
 /* Setup registers for a PF mailbox */
@@ -409,20 +393,16 @@ static void octep_setup_mbox_regs_cnxk_pf(struct octep_device *oct, int q_no)
 	struct octep_mbox *mbox = oct->mbox[q_no];
 
 	/* PF to VF DATA reg. PF writes into this reg */
-	mbox->pf_vf_data_reg = oct->mmio[0].hw_addr +
-				CNXK_SDP_MBOX_PF_VF_DATA(q_no);
+	mbox->pf_vf_data_reg = oct->mmio[0].hw_addr + CNXK_SDP_MBOX_PF_VF_DATA(q_no);
 
 	/* VF to PF DATA reg. PF reads from this reg */
-	mbox->vf_pf_data_reg = oct->mmio[0].hw_addr +
-				CNXK_SDP_MBOX_VF_PF_DATA(q_no);
-
+	mbox->vf_pf_data_reg = oct->mmio[0].hw_addr + CNXK_SDP_MBOX_VF_PF_DATA(q_no);
 }
 
 static void octep_poll_pfvf_mailbox_cnxk_pf(struct octep_device *oct)
 {
 	u32 vf, active_vfs, active_rings_per_vf, vf_mbox_queue;
 	u64 reg0;
-	int handled = 0;
 
 	reg0 = octep_read_csr64(oct, CNXK_SDP_EPF_MBOX_RINT(0));
 	if (reg0) {
@@ -441,8 +421,6 @@ static void octep_poll_pfvf_mailbox_cnxk_pf(struct octep_device *oct)
 		}
 		if (reg0)
 			octep_write_csr64(oct, CNXK_SDP_EPF_MBOX_RINT(0), reg0);
-
-		handled = 1;
 	}
 }
 
@@ -458,7 +436,6 @@ static irqreturn_t octep_pfvf_mbox_intr_handler_cnxk_pf(void *dev)
 static void octep_poll_oei_cnxk_pf(struct octep_device *oct)
 {
 	u64 reg0;
-	int handled = 0;
 
 	/* Check for OEI INTR */
 	reg0 = octep_read_csr64(oct, CNXK_SDP_EPF_OEI_RINT);
@@ -468,10 +445,7 @@ static void octep_poll_oei_cnxk_pf(struct octep_device *oct)
 			queue_work(octep_wq, &oct->ctrl_mbox_task);
 		if (reg0 & CNXK_SDP_EPF_OEI_RINT_DATA_BIT_HBEAT)
 			atomic_set(&oct->hb_miss_cnt, 0);
-
-		handled = 1;
 	}
-
 }
 
 /* OEI interrupt handler */
@@ -593,9 +567,9 @@ static irqreturn_t octep_dma_intr_handler_cnxk_pf(void *dev)
 
 	/* Check for DMA INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_DMA_RINT);
-	if (reg_val) {
+	if (reg_val)
 		octep_write_csr64(oct, CNXK_SDP_EPF_DMA_RINT, reg_val);
-	}
+
 	return IRQ_HANDLED;
 }
 
@@ -664,14 +638,7 @@ static irqreturn_t octep_rsvd_intr_handler_cnxk_pf(void *dev)
 static irqreturn_t octep_ioq_intr_handler_cnxk_pf(void *data)
 {
 	struct octep_ioq_vector *vector = (struct octep_ioq_vector *)data;
-	struct octep_oq *oq;
-
-	if (!vector)
-		return IRQ_HANDLED;
-	oq = vector->oq;
-
-	if (!oq || !(oq->napi))
-		return IRQ_HANDLED;
+	struct octep_oq *oq = vector->oq;
 
 	napi_schedule_irqoff(oq->napi);
 	return IRQ_HANDLED;
@@ -693,7 +660,7 @@ static int octep_soft_reset_cnxk_pf(struct octep_device *oct)
 	 * the module is removed.
 	 */
 	OCTEP_PCI_WIN_WRITE(oct, CNXK_PEMX_PFX_CSX_PFCFGX(0, 0, CNXK_PCIEEP_VSECST_CTL),
-			    FW_STATUS_DOWNING);
+			    FW_STATUS_RUNNING);
 
 	/* Set chip domain reset bit */
 	OCTEP_PCI_WIN_WRITE(oct, CNXK_RST_CHIP_DOMAIN_W1S, 1);
@@ -753,22 +720,14 @@ static void octep_enable_interrupts_cnxk_pf(struct octep_device *oct)
 /* Disable all interrupts */
 static void octep_disable_interrupts_cnxk_pf(struct octep_device *oct)
 {
-	u64 reg_val, intr_mask = 0ULL;
+	u64 intr_mask = 0ULL;
 	int srn, num_rings, i;
 
 	srn = CFG_GET_PORTS_PF_SRN(oct->conf);
 	num_rings = CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf);
 
-	for (i = 0; i < num_rings; i++) {
+	for (i = 0; i < num_rings; i++)
 		intr_mask |= (0x1ULL << (srn + i));
-		reg_val = octep_read_csr64(oct, CNXK_SDP_R_IN_INT_LEVELS(srn + i));
-		reg_val &= ~(0x1ULL << 62);
-		octep_write_csr64(oct, CNXK_SDP_R_IN_INT_LEVELS(srn + i), reg_val);
-
-		reg_val = octep_read_csr64(oct, CNXK_SDP_R_OUT_INT_LEVELS(srn + i));
-		reg_val &= ~(0x1ULL << 62);
-		octep_write_csr64(oct, CNXK_SDP_R_OUT_INT_LEVELS(srn + i), reg_val);
-	}
 
 	octep_write_csr64(oct, CNXK_SDP_EPF_IRERR_RINT_ENA_W1C, intr_mask);
 	octep_write_csr64(oct, CNXK_SDP_EPF_ORERR_RINT_ENA_W1C, intr_mask);
@@ -791,15 +750,8 @@ static u32 octep_update_iq_read_index_cnxk_pf(struct octep_iq *iq)
 	u32 pkt_in_done = readl(iq->inst_cnt_reg);
 	u32 last_done, new_idx;
 
-	if (unlikely(pkt_in_done == 0xFFFFFFFF)) {
-		last_done = 0;
-		if (printk_ratelimit()) {
-			dev_err(iq->dev, "IQ-%u count read failure\n", iq->q_no);
-		}
-	} else {
-		last_done = pkt_in_done - iq->pkt_in_done;
-		iq->pkt_in_done = pkt_in_done;
-	}
+	last_done = pkt_in_done - iq->pkt_in_done;
+	iq->pkt_in_done = pkt_in_done;
 
 	new_idx = (iq->octep_read_index + last_done) % iq->max_count;
 
@@ -969,5 +921,5 @@ void octep_device_setup_cnxk_pf(struct octep_device *oct)
 	 * leave it in a state that is not READY (1).
 	 */
 	OCTEP_PCI_WIN_WRITE(oct, CNXK_PEMX_PFX_CSX_PFCFGX(0, 0, CNXK_PCIEEP_VSECST_CTL),
-			     FW_STATUS_RUNNING);
+			    FW_STATUS_RUNNING);
 }

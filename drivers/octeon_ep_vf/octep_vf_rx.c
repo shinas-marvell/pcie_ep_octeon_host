@@ -27,12 +27,11 @@ static void octep_vf_oq_reset_indices(struct octep_vf_oq *oq)
  * @oq: Octeon Rx queue data structure.
  *
  * Return: 0, if successfully filled receive buffers for all descriptors.
- *         -1, if failed to allocate a buffer or failed to map for DMA.
+ *         -ENOMEM, if failed to allocate a buffer or failed to map for DMA.
  */
 static int octep_vf_oq_fill_ring_buffers(struct octep_vf_oq *oq)
 {
 	struct octep_vf_oq_desc_hw *desc_ring = oq->desc_ring;
-	struct octep_vf_oq_resp_hw *resp_hw;
 	struct page *page;
 	u32 i;
 
@@ -42,9 +41,6 @@ static int octep_vf_oq_fill_ring_buffers(struct octep_vf_oq *oq)
 			dev_err(oq->dev, "Rx buffer alloc failed\n");
 			goto rx_buf_alloc_err;
 		}
-		resp_hw = page_address(page);
-		resp_hw->length = 0x0;
-
 		desc_ring[i].buffer_ptr = dma_map_page(oq->dev, page, 0,
 						       PAGE_SIZE,
 						       DMA_FROM_DEVICE);
@@ -52,7 +48,6 @@ static int octep_vf_oq_fill_ring_buffers(struct octep_vf_oq *oq)
 			dev_err(oq->dev,
 				"OQ-%d buffer alloc: DMA mapping error!\n",
 				oq->q_no);
-			put_page(page);
 			goto dma_map_err;
 		}
 		oq->buff_info[i].page = page;
@@ -61,6 +56,7 @@ static int octep_vf_oq_fill_ring_buffers(struct octep_vf_oq *oq)
 	return 0;
 
 dma_map_err:
+	put_page(page);
 rx_buf_alloc_err:
 	while (i) {
 		i--;
@@ -69,7 +65,7 @@ rx_buf_alloc_err:
 		oq->buff_info[i].page = NULL;
 	}
 
-	return -1;
+	return -ENOMEM;
 }
 
 /**
@@ -83,7 +79,6 @@ rx_buf_alloc_err:
 static int octep_vf_oq_refill(struct octep_vf_device *oct, struct octep_vf_oq *oq)
 {
 	struct octep_vf_oq_desc_hw *desc_ring = oq->desc_ring;
-	struct octep_vf_oq_resp_hw *resp_hw;
 	struct page *page;
 	u32 refill_idx, i;
 
@@ -95,8 +90,6 @@ static int octep_vf_oq_refill(struct octep_vf_device *oct, struct octep_vf_oq *o
 			oq->stats.alloc_failures++;
 			break;
 		}
-		resp_hw = page_address(page);
-		resp_hw->length = 0x0;
 
 		desc_ring[refill_idx].buffer_ptr = dma_map_page(oq->dev, page, 0,
 								PAGE_SIZE, DMA_FROM_DEVICE);
@@ -164,11 +157,9 @@ static int octep_vf_setup_oq(struct octep_vf_device *oct, int q_no)
 			"Failed to allocate DMA memory for OQ-%d !!\n", q_no);
 		goto desc_dma_alloc_err;
 	}
-	dev_info(oq->dev,
-		"***** Q.No-%d desc_ring_dma:0x%llx !!\n", q_no, oq->desc_ring_dma);
 
-	oq->buff_info = (struct octep_vf_rx_buffer *)
-			vzalloc(oq->max_count * OCTEP_VF_OQ_RECVBUF_SIZE);
+	oq->buff_info = vzalloc(oq->max_count * OCTEP_VF_OQ_RECVBUF_SIZE);
+
 	if (unlikely(!oq->buff_info)) {
 		dev_err(&oct->pdev->dev,
 			"Failed to allocate buffer info for OQ-%d\n", q_no);
@@ -179,9 +170,7 @@ static int octep_vf_setup_oq(struct octep_vf_device *oct, int q_no)
 		goto oq_fill_buff_err;
 
 	octep_vf_oq_reset_indices(oq);
-	if (oct->hw_ops.setup_oq_regs(oct, q_no))
-		goto oq_fill_buff_err;
-
+	oct->hw_ops.setup_oq_regs(oct, q_no);
 	oct->num_oqs++;
 
 	return 0;
@@ -197,7 +186,7 @@ desc_dma_alloc_err:
 	vfree(oq);
 	oct->oq[q_no] = NULL;
 create_oq_fail:
-	return -1;
+	return -ENOMEM;
 }
 
 /**
@@ -241,8 +230,7 @@ static int octep_vf_free_oq(struct octep_vf_oq *oq)
 
 	octep_vf_oq_free_ring_buffers(oq);
 
-	if (oq->buff_info)
-		vfree(oq->buff_info);
+	vfree(oq->buff_info);
 
 	if (oq->desc_ring)
 		dma_free_coherent(oq->dev,
@@ -282,7 +270,7 @@ oq_setup_err:
 		i--;
 		octep_vf_free_oq(oct->oq[i]);
 	}
-	return -1;
+	return retval;
 }
 
 /**
@@ -318,8 +306,6 @@ void octep_vf_free_oqs(struct octep_vf_device *oct)
 	}
 }
 
-static void __maybe_unused octep_vf_oq_dump_state(struct octep_vf_oq *oq);
-
 /**
  * octep_vf_oq_check_hw_for_pkts() - Check for new Rx packets.
  *
@@ -332,26 +318,9 @@ static int octep_vf_oq_check_hw_for_pkts(struct octep_vf_device *oct,
 					 struct octep_vf_oq *oq)
 {
 	u32 pkt_count, new_pkts;
-	u32 last_pkt_count, pkts_pending;
 
 	pkt_count = readl(oq->pkts_sent_reg);
-	if (unlikely(pkt_count == 0xFFFFFFFF)) {
-		writel(pkt_count, oq->pkts_sent_reg);
-		pkt_count = 0;
-		if (printk_ratelimit()) {
-			dev_err(oq->dev, "OQ-%u count read failure\n", oq->q_no);
-		}
-		return 0;
-	}
-	last_pkt_count = READ_ONCE(oq->last_pkt_count);
-	new_pkts = pkt_count - last_pkt_count;
-
-	if (pkt_count < last_pkt_count) {
-		dev_err(oq->dev, "OQ-%u pkt_count(%u) < oq->last_pkt_count(%u)\n",
-			oq->q_no, pkt_count, last_pkt_count);
-		oct->hw_ops.dump_OQ_registers(oct, oq->q_no);
-		octep_vf_oq_dump_state(oq);
-	}
+	new_pkts = pkt_count - oq->last_pkt_count;
 
 	/* Clear the hardware packets counter register if the rx queue is
 	 * being processed continuously with-in a single interrupt and
@@ -361,37 +330,11 @@ static int octep_vf_oq_check_hw_for_pkts(struct octep_vf_device *oct,
 	if (unlikely(pkt_count > 0xF0000000U)) {
 		writel(pkt_count, oq->pkts_sent_reg);
 		pkt_count = readl(oq->pkts_sent_reg);
-		if (unlikely(pkt_count == 0xFFFFFFFF)) {
-			pkt_count = 0;
-			if (printk_ratelimit()) {
-				dev_err(oq->dev, "OQ-%u count readback failure\n", oq->q_no);
-			}
-		}
-		dev_err(oq->dev, "OQ-%u pkt_count  > 0xF0000000U\n", oq->q_no);
 		new_pkts += pkt_count;
 	}
-	WRITE_ONCE(oq->last_pkt_count, pkt_count);
-	pkts_pending = READ_ONCE(oq->pkts_pending);
-	WRITE_ONCE(oq->pkts_pending, (pkts_pending + new_pkts));
+	oq->last_pkt_count = pkt_count;
+	oq->pkts_pending += new_pkts;
 	return new_pkts;
-}
-
-static void __maybe_unused octep_vf_oq_dump_state(struct octep_vf_oq *oq)
-{
-	dev_info(oq->dev, "==== OQ[%d] state ====\n", oq->q_no);
-	dev_info(oq->dev,
-		 "OQ[%d]: pkts_pending = %u; last_pkt_count = %u; host_read_idx = %u\n",
-		 oq->q_no, oq->pkts_pending, oq->last_pkt_count, oq->host_read_idx);
-	dev_info(oq->dev,
-		 "OQ[%d]: refill_count = %u; refill_idx = %u; threshold = %u\n",
-		 oq->q_no, oq->refill_count, oq->host_refill_idx, oq->refill_threshold);
-	dev_info(oq->dev,
-		 "OQ[%d]: ring size = %u; buffer_size = %u; max_single__buffer_size = %u\n",
-		 oq->q_no, oq->max_count, oq->buffer_size, oq->max_single_buffer_size);
-	dev_info(oq->dev,
-		 "OQ[%d] stats: pkts = %llu; bytes = %llu; fails = %llu; delayed = %llu\n",
-		 oq->q_no, oq->stats.packets, oq->stats.bytes,
-		 oq->stats.alloc_failures, oq->stats.pkts_delayed_data);
 }
 
 /**
@@ -417,54 +360,16 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 	u32 pkt, rx_bytes, desc_used;
 	u16 data_offset, rx_ol_flags;
 	struct sk_buff *skb;
-	struct page *page;
-	u32 read_idx, i;
+	u32 read_idx;
 
-	read_idx = READ_ONCE(oq->host_read_idx);
+	read_idx = oq->host_read_idx;
 	rx_bytes = 0;
 	desc_used = 0;
 	for (pkt = 0; pkt < pkts_to_process; pkt++) {
 		buff_info = (struct octep_vf_rx_buffer *)&oq->buff_info[read_idx];
-		page = buff_info->page;
 		dma_unmap_page(oq->dev, oq->desc_ring[read_idx].buffer_ptr,
 			       PAGE_SIZE, DMA_FROM_DEVICE);
 		resp_hw = page_address(buff_info->page);
-		smp_rmb();
-
-		if(unlikely(*((volatile uint64_t *)&resp_hw->length) == 0)) {
-			int retry = 100;
-
-			dev_dbg(oq->dev,
-				"OQ[%d]: host_read_idx: %d; Data not ready yet, "
-				"Retry; pkt=%u, pkt_count=%u, pending=%u\n",
-				oq->q_no, oq->host_read_idx,
-				pkt, pkts_to_process, oq->pkts_pending);
-			oq->stats.pkts_delayed_data++;
-			while (retry-- && unlikely(*((volatile uint64_t *)&resp_hw->length) == 0))
-				udelay(50);
-			if (unlikely(!resp_hw->length)) {
-				dev_err(oq->dev, "OQ[%d]: ZERO_PKT_LEN pkt:%d SUSPENDED", oq->q_no, pkt);
-				dev_err(oq->dev,
-					"OQ[%d]: host_read_idx: %d; Data not available, "
-					"pkt=%u, pkt_count(pkts_to_process)=%u, pending=%u\n",
-					oq->q_no, oq->host_read_idx,
-					pkt, pkts_to_process, oq->pkts_pending);
-				oct->hw_ops.dump_OQ_registers(oct, oq->q_no);
-				octep_vf_oq_dump_state(oq);
-				for (i = 0; i < oct->num_oqs; i++) {
-					oct->oq[i]->suspend = true;
-					oct->hw_ops.disable_iq(oct, i);
-					oct->hw_ops.disable_oq(oct, i);
-				}
-				oq->desc_ring[read_idx].buffer_ptr =
-					dma_map_page(oq->dev, page, 0, PAGE_SIZE, DMA_FROM_DEVICE);
-				/* Stop Tx from stack */
-				netif_tx_stop_all_queues(oct->netdev);
-				netif_carrier_off(oct->netdev);
-				netif_tx_disable(oct->netdev);
-				return pkt;
-			}
-		}
 		buff_info->page = NULL;
 
 		/* Swap the length field that is in Big-Endian to CPU */
@@ -492,7 +397,7 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 		rx_bytes += buff_info->len;
 
 		if (buff_info->len <= oq->max_single_buffer_size) {
-			skb = build_skb((void *)resp_hw, PAGE_SIZE);
+			skb = napi_build_skb((void *)resp_hw, PAGE_SIZE);
 			skb_reserve(skb, data_offset);
 			skb_put(skb, buff_info->len);
 			read_idx++;
@@ -503,7 +408,7 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 			struct skb_shared_info *shinfo;
 			u16 data_len;
 
-			skb = build_skb((void *)resp_hw, PAGE_SIZE);
+			skb = napi_build_skb((void *)resp_hw, PAGE_SIZE);
 			skb_reserve(skb, data_offset);
 			/* Head fragment includes response header(s);
 			 * subsequent fragments contains only data.
@@ -542,7 +447,7 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 		}
 
 		skb->dev = oq->netdev;
-		skb->protocol =  eth_type_trans(skb, skb->dev);
+		skb->protocol = eth_type_trans(skb, skb->dev);
 		if (feat & NETIF_F_RXCSUM &&
 		    OCTEP_VF_RX_CSUM_VERIFIED(rx_ol_flags))
 			skb->ip_summed = CHECKSUM_UNNECESSARY;
@@ -551,7 +456,7 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 		napi_gro_receive(oq->napi, skb);
 	}
 
-	WRITE_ONCE(oq->host_read_idx, read_idx);
+	oq->host_read_idx = read_idx;
 	oq->refill_count += desc_used;
 	oq->stats.packets += pkt;
 	oq->stats.bytes += rx_bytes;
@@ -574,33 +479,23 @@ int octep_vf_oq_process_rx(struct octep_vf_oq *oq, int budget)
 {
 	u32 pkts_available, pkts_processed, total_pkts_processed;
 	struct octep_vf_device *oct = oq->octep_vf_dev;
-	u32 pkts_pending;
 
 	pkts_available = 0;
 	pkts_processed = 0;
 	total_pkts_processed = 0;
 	while (total_pkts_processed < budget) {
-		if (oq->suspend == true)
-			return 0;
-
 		 /* update pending count only when current one exhausted */
-		pkts_pending = READ_ONCE(oq->pkts_pending);
-		if (pkts_pending == 0)
+		if (oq->pkts_pending == 0)
 			octep_vf_oq_check_hw_for_pkts(oct, oq);
-		pkts_pending = READ_ONCE(oq->pkts_pending);
 		pkts_available = min(budget - total_pkts_processed,
-				     pkts_pending);
+				     oq->pkts_pending);
 		if (!pkts_available)
 			break;
 
 		pkts_processed = __octep_vf_oq_process_rx(oct, oq,
 							  pkts_available);
-		pkts_pending = READ_ONCE(oq->pkts_pending);
-		WRITE_ONCE(oq->pkts_pending, (pkts_pending - pkts_processed));
+		oq->pkts_pending -= pkts_processed;
 		total_pkts_processed += pkts_processed;
-
-		if (oq->suspend == true)
-			return 0;
 	}
 
 	if (oq->refill_count >= oq->refill_threshold) {

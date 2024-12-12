@@ -371,7 +371,7 @@
 #define    CN93_SDP_MAC_PF_RING_CTL_SRN(val)   (((val) >> 8) & 0xFF)
 #define    CN93_SDP_MAC_PF_RING_CTL_RPPF(val)  (((val) >> 16) & 0x3F)
 
-#define    CN98_SDP_MAC_PF_RING_CTL_NPFS(val)  ((val >> 48) & 0xF)
+#define    CN98_SDP_MAC_PF_RING_CTL_NPFS(val)  (((val) >> 48) & 0xF)
 #define    CN98_SDP_MAC_PF_RING_CTL_SRN(val)   ((val) & 0xFF)
 #define    CN98_SDP_MAC_PF_RING_CTL_RPPF(val)  (((val) >> 32) & 0x3F)
 
@@ -383,21 +383,8 @@
 /* bit 1 for firmware heartbeat interrupt */
 #define CN93_SDP_EPF_OEI_RINT_DATA_BIT_HBEAT	BIT_ULL(1)
 
-#define FW_STATUS_DOWNING      0ULL
-#define FW_STATUS_READY 1ULL
-#define FW_STATUS_RUNNING      2ULL
-#define CN9K_PEMX_PFX_CSX_PFCFGX(pem, pf, offset)      ((0x8e0000008000 | (uint64_t)pem << 36 \
-							| pf << 18 \
-							| ((offset >> 16) & 1) << 16 \
-							| (offset >> 3) << 3) \
-							+ (((offset >> 2) & 1) << 2))
-
-/* Register defines for use with CN9K_PEMX_PFX_CSX_PFCFGX */
-#define CN9K_PCIEEP_VSECST_CTL  0x4D0
-
-#define CN93_PEM_BAR4_INDEX		7
-#define CN93_PEM_BAR4_INDEX_SIZE	0x400000ULL
-#define CN93_PEM_BAR4_INDEX_OFFSET	(CN93_PEM_BAR4_INDEX * CN93_PEM_BAR4_INDEX_SIZE)
-
+#define CN93_PEM_BAR4_INDEX            7
+#define CN93_PEM_BAR4_INDEX_SIZE       0x400000ULL
+#define CN93_PEM_BAR4_INDEX_OFFSET     (CN93_PEM_BAR4_INDEX * CN93_PEM_BAR4_INDEX_SIZE)
 
 #endif /* _OCTEP_REGS_CN9K_PF_H_ */

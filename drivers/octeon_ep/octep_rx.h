@@ -19,7 +19,9 @@
 struct octep_oq_desc_hw {
 	dma_addr_t buffer_ptr;
 	u64 info_ptr;
-} __packed;
+};
+
+static_assert(sizeof(struct octep_oq_desc_hw) == 16);
 
 #define OCTEP_OQ_DESC_SIZE    (sizeof(struct octep_oq_desc_hw))
 
@@ -57,7 +59,9 @@ struct octep_oq_resp_hw_ext {
 
 	/* offload flags */
 	u16 rx_ol_flags;
-} __packed;
+};
+
+static_assert(sizeof(struct octep_oq_resp_hw_ext) == 8);
 
 #define  OCTEP_OQ_RESP_HW_EXT_SIZE   (sizeof(struct octep_oq_resp_hw_ext))
 
@@ -68,7 +72,9 @@ struct octep_oq_resp_hw_ext {
 struct octep_oq_resp_hw {
 	/* The Length of the packet. */
 	__be64 length;
-} __packed;
+};
+
+static_assert(sizeof(struct octep_oq_resp_hw) == 8);
 
 #define OCTEP_OQ_RESP_HW_SIZE   (sizeof(struct octep_oq_resp_hw))
 
@@ -98,9 +104,6 @@ struct octep_oq_stats {
 
 	/* Number of times failed to allocate buffers. */
 	u64 alloc_failures;
-
-	/* Number of packets for which data arrived late. */
-	u64 pkts_delayed_data;
 };
 
 #define OCTEP_OQ_STATS_SIZE   (sizeof(struct octep_oq_stats))
@@ -209,9 +212,6 @@ struct octep_oq {
 	/* The size of each buffer pointed by the buffer pointer. */
 	u32 buffer_size;
 	u32 max_single_buffer_size;
-
-	/* indicates queue is suspended in case of unexpected/unhandled event */
-	bool suspend;
 
 	/* The 8B aligned descriptor ring starts at this address. */
 	struct octep_oq_desc_hw *desc_ring;

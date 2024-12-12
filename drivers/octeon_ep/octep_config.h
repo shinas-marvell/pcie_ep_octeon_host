@@ -48,15 +48,13 @@
 
 /* Minimum MTU supported by Octeon network interface */
 #define OCTEP_MIN_MTU        ETH_MIN_MTU
-/* Maximum MTU supported by Octeon interface*/
-#define OCTEP_MAX_MTU        (10000 - (ETH_HLEN + ETH_FCS_LEN))
 /* Default MTU */
 #define OCTEP_DEFAULT_MTU    1500
 
 /* pf heartbeat interval in milliseconds */
-#define OCTEP_DEFAULT_FW_HB_INTERVAL		1000
+#define OCTEP_DEFAULT_FW_HB_INTERVAL           1000
 /* pf heartbeat miss count */
-#define OCTEP_DEFAULT_FW_HB_MISS_COUNT		20
+#define OCTEP_DEFAULT_FW_HB_MISS_COUNT         20
 
 /* Macros to get octeon config params */
 #define CFG_GET_IQ_CFG(cfg)             ((cfg)->iq)

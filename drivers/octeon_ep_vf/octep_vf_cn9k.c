@@ -78,9 +78,9 @@ static void cn93_vf_dump_q_regs(struct octep_vf_device *oct, int qno)
 }
 
 /* Reset Hardware Tx queue */
-static int cn93_vf_reset_iq(struct octep_vf_device *oct, int q_no)
+static void cn93_vf_reset_iq(struct octep_vf_device *oct, int q_no)
 {
-	u64 val = 0ULL;
+	u64 val = ULL(0);
 
 	dev_dbg(&oct->pdev->dev, "Reset VF IQ-%d\n", q_no);
 
@@ -94,19 +94,18 @@ static int cn93_vf_reset_iq(struct octep_vf_device *oct, int q_no)
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_INSTR_BADDR(q_no), val);
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_INSTR_RSIZE(q_no), val);
 
-	val = 0xFFFFFFFF;
+	val = GENMASK_ULL(31, 0);
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_INSTR_DBELL(q_no), val);
 
 	val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_IN_CNTS(q_no));
-	octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_CNTS(q_no), val & 0xFFFFFFFF);
-
-	return 0;
+	octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_CNTS(q_no),
+			     val & GENMASK_ULL(31, 0));
 }
 
 /* Reset Hardware Rx queue */
 static void cn93_vf_reset_oq(struct octep_vf_device *oct, int q_no)
 {
-	u64 val = 0ULL;
+	u64 val = ULL(0);
 
 	/* Disable Output (Rx) Ring */
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_ENABLE(q_no), val);
@@ -115,8 +114,8 @@ static void cn93_vf_reset_oq(struct octep_vf_device *oct, int q_no)
 	val = octep_vf_read_csr(oct, CN93_VF_SDP_R_OUT_CNTS(q_no));
 	octep_vf_write_csr(oct, CN93_VF_SDP_R_OUT_CNTS(q_no), val);
 
-	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_PKT_CNT(q_no), 0xFFFFFFFFFULL);
-	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_SLIST_DBELL(q_no), 0xFFFFFFFF);
+	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_PKT_CNT(q_no), GENMASK_ULL(35, 0));
+	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_SLIST_DBELL(q_no), GENMASK_ULL(31, 0));
 }
 
 /* Reset all hardware Tx/Rx queues */
@@ -192,16 +191,16 @@ static void octep_vf_setup_iq_regs_cn93(struct octep_vf_device *oct, int iq_no)
 	writel(reset_instr_cnt, iq->inst_cnt_reg);
 
 	/* INTR_THRESHOLD is set to max(FFFFFFFF) to disable the INTR */
-	reg_val = CFG_GET_IQ_INTR_THRESHOLD(oct->conf) & 0xffffffff;
+	reg_val = CFG_GET_IQ_INTR_THRESHOLD(oct->conf) & GENMASK_ULL(31, 0);
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_INT_LEVELS(iq_no), reg_val);
 }
 
 /* Setup registers for a hardware Rx Queue  */
-static int octep_vf_setup_oq_regs_cn93(struct octep_vf_device *oct, int oq_no)
+static void octep_vf_setup_oq_regs_cn93(struct octep_vf_device *oct, int oq_no)
 {
 	struct octep_vf_oq *oq = oct->oq[oq_no];
 	u32 time_threshold = 0;
-	u64 oq_ctl = 0ULL;
+	u64 oq_ctl = ULL(0);
 	u64 reg_val;
 
 	reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_CONTROL(oq_no));
@@ -229,8 +228,8 @@ static int octep_vf_setup_oq_regs_cn93(struct octep_vf_device *oct, int oq_no)
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_SLIST_RSIZE(oq_no), oq->max_count);
 
 	oq_ctl = octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_CONTROL(oq_no));
-	oq_ctl &= ~0x7fffffULL;	//clear the ISIZE and BSIZE (22-0)
-	oq_ctl |= (oq->buffer_size & 0xffff);	//populate the BSIZE (15-0)
+	oq_ctl &= ~GENMASK_ULL(22, 0);	//clear the ISIZE and BSIZE (22-0)
+	oq_ctl |= (oq->buffer_size & GENMASK_ULL(15, 0));	//populate the BSIZE (15-0)
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_CONTROL(oq_no), oq_ctl);
 
 	/* Get the mapped address of the pkt_sent and pkts_credit regs */
@@ -240,7 +239,6 @@ static int octep_vf_setup_oq_regs_cn93(struct octep_vf_device *oct, int oq_no)
 	time_threshold = CFG_GET_OQ_INTR_TIME(oct->conf);
 	reg_val = ((u64)time_threshold << 32) | CFG_GET_OQ_INTR_PKT(oct->conf);
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_INT_LEVELS(oq_no), reg_val);
-	return 0;
 }
 
 /* Setup registers for a VF mailbox */
@@ -270,11 +268,13 @@ static void cn93_handle_vf_mbox_intr(struct octep_vf_device *oct)
 /* Tx/Rx queue interrupt handler */
 static irqreturn_t octep_vf_ioq_intr_handler_cn93(void *data)
 {
-	struct octep_vf_ioq_vector *vector = (struct octep_vf_ioq_vector *)data;
-	struct octep_vf_oq *oq = vector->oq;
-	struct octep_vf_device *oct = vector->octep_vf_dev;
-	u64 reg_val = 0ULL;
+	struct octep_vf_ioq_vector *vector = data;
+	struct octep_vf_device *oct;
+	struct octep_vf_oq *oq;
+	u64 reg_val;
 
+	oct = vector->octep_vf_dev;
+	oq = vector->oq;
 	/* Mailbox interrupt arrives along with interrupt of tx/rx ring pair 0 */
 	if (oq->q_no == 0) {
 		reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_MBOX_PF_VF_INT(0));
@@ -314,11 +314,11 @@ static void octep_vf_enable_interrupts_cn93(struct octep_vf_device *oct)
 	num_rings = CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf);
 	for (q = 0; q < num_rings; q++) {
 		reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_IN_INT_LEVELS(q));
-		reg_val |= (0x1ULL << 62);
+		reg_val |= BIT_ULL_MASK(62);
 		octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_INT_LEVELS(q), reg_val);
 
 		reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_INT_LEVELS(q));
-		reg_val |= (0x1ULL << 62);
+		reg_val |= BIT_ULL_MASK(62);
 		octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_INT_LEVELS(q), reg_val);
 	}
 	/* Enable PF to VF mbox interrupt by setting 2nd bit*/
@@ -339,11 +339,11 @@ static void octep_vf_disable_interrupts_cn93(struct octep_vf_device *oct)
 	num_rings = CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf);
 	for (q = 0; q < num_rings; q++) {
 		reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_IN_INT_LEVELS(q));
-		reg_val &= ~(0x1ULL << 62);
+		reg_val &= ~BIT_ULL_MASK(62);
 		octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_INT_LEVELS(q), reg_val);
 
 		reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_INT_LEVELS(q));
-		reg_val &= ~(0x1ULL << 62);
+		reg_val &= ~BIT_ULL_MASK(62);
 		octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_INT_LEVELS(q), reg_val);
 	}
 }
@@ -354,15 +354,8 @@ static u32 octep_vf_update_iq_read_index_cn93(struct octep_vf_iq *iq)
 	u32 pkt_in_done = readl(iq->inst_cnt_reg);
 	u32 last_done, new_idx;
 
-	if (unlikely(pkt_in_done == 0xFFFFFFFF)) {
-		last_done = 0;
-		if (printk_ratelimit()) {
-			dev_err(iq->dev, "IQ-%u count read failure\n", iq->q_no);
-		}
-	} else {
-		last_done = pkt_in_done - iq->pkt_in_done;
-		iq->pkt_in_done = pkt_in_done;
-	}
+	last_done = pkt_in_done - iq->pkt_in_done;
+	iq->pkt_in_done = pkt_in_done;
 
 	new_idx = (iq->octep_vf_read_index + last_done) % iq->max_count;
 
@@ -375,7 +368,7 @@ static void octep_vf_enable_iq_cn93(struct octep_vf_device *oct, int iq_no)
 	u64 loop = HZ;
 	u64 reg_val;
 
-	octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_INSTR_DBELL(iq_no), 0xFFFFFFFF);
+	octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_INSTR_DBELL(iq_no), GENMASK_ULL(31, 0));
 
 	while (octep_vf_read_csr64(oct, CN93_VF_SDP_R_IN_INSTR_DBELL(iq_no)) &&
 	       loop--) {
@@ -383,27 +376,27 @@ static void octep_vf_enable_iq_cn93(struct octep_vf_device *oct, int iq_no)
 	}
 
 	reg_val = octep_vf_read_csr64(oct,  CN93_VF_SDP_R_IN_INT_LEVELS(iq_no));
-	reg_val |= (0x1ULL << 62);
+	reg_val |= BIT_ULL_MASK(62);
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_INT_LEVELS(iq_no), reg_val);
 
 	reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_IN_ENABLE(iq_no));
-	reg_val |= 0x1ULL;
+	reg_val |= ULL(1);
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_ENABLE(iq_no), reg_val);
 }
 
 /* Enable a hardware Rx Queue */
 static void octep_vf_enable_oq_cn93(struct octep_vf_device *oct, int oq_no)
 {
-	u64 reg_val = 0ULL;
+	u64 reg_val;
 
 	reg_val = octep_vf_read_csr64(oct,  CN93_VF_SDP_R_OUT_INT_LEVELS(oq_no));
-	reg_val |= (0x1ULL << 62);
+	reg_val |= BIT_ULL_MASK(62);
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_INT_LEVELS(oq_no), reg_val);
 
-	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_SLIST_DBELL(oq_no), 0xFFFFFFFF);
+	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_SLIST_DBELL(oq_no), GENMASK_ULL(31, 0));
 
 	reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_ENABLE(oq_no));
-	reg_val |= 0x1ULL;
+	reg_val |= ULL(1);
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_ENABLE(oq_no), reg_val);
 }
 
@@ -421,27 +414,27 @@ static void octep_vf_enable_io_queues_cn93(struct octep_vf_device *oct)
 /* Disable a hardware Tx Queue assigned to VF */
 static void octep_vf_disable_iq_cn93(struct octep_vf_device *oct, int iq_no)
 {
-	u64 reg_val = 0ULL;
+	u64 reg_val;
 
 	reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_IN_ENABLE(iq_no));
-	reg_val &= ~0x1ULL;
+	reg_val &= ~ULL(1);
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_ENABLE(iq_no), reg_val);
 }
 
 /* Disable a hardware Rx Queue assigned to VF */
 static void octep_vf_disable_oq_cn93(struct octep_vf_device *oct, int oq_no)
 {
-	u64 reg_val = 0ULL;
+	u64 reg_val;
 
 	reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_ENABLE(oq_no));
-	reg_val &= ~0x1ULL;
+	reg_val &= ~ULL(1);
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_ENABLE(oq_no), reg_val);
 }
 
 /* Disable all hardware Tx/Rx Queues assigned to VF */
 static void octep_vf_disable_io_queues_cn93(struct octep_vf_device *oct)
 {
-	int q = 0;
+	int q;
 
 	for (q = 0; q < CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf); q++) {
 		octep_vf_disable_iq_cn93(oct, q);
@@ -457,46 +450,6 @@ static void octep_vf_dump_registers_cn93(struct octep_vf_device *oct)
 	num_rings = CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf);
 	for (q = 0; q < num_rings; q++)
 		cn93_vf_dump_q_regs(oct, q);
-}
-
-static void cn93_vf_dump_oq_regs(struct octep_vf_device *oct, int qno)
-{
-	struct device *dev = &oct->pdev->dev;
-	dev_info(dev, "OQ-%d register dump\n", qno);
-	dev_info(dev, "R[%d]_OUT_SLIST_DBELL[0x%llx]: 0x%016llx\n",
-		 qno, CN93_VF_SDP_R_OUT_SLIST_DBELL(qno),
-		 octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_SLIST_DBELL(qno)));
-	dev_info(dev, "R[%d]_OUT_CONTROL[0x%llx]: 0x%016llx\n",
-		 qno, CN93_VF_SDP_R_OUT_CONTROL(qno),
-		 octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_CONTROL(qno)));
-	dev_info(dev, "R[%d]_OUT_ENABLE[0x%llx]: 0x%016llx\n",
-		 qno, CN93_VF_SDP_R_OUT_ENABLE(qno),
-		 octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_ENABLE(qno)));
-	dev_info(dev, "R[%d]_OUT_SLIST_BADDR[0x%llx]: 0x%016llx\n",
-		 qno, CN93_VF_SDP_R_OUT_SLIST_BADDR(qno),
-		 octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_SLIST_BADDR(qno)));
-	dev_info(dev, "R[%d]_OUT_SLIST_RSIZE[0x%llx]: 0x%016llx\n",
-		 qno, CN93_VF_SDP_R_OUT_SLIST_RSIZE(qno),
-		 octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_SLIST_RSIZE(qno)));
-	dev_info(dev, "R[%d]_OUT_CNTS[0x%llx]: 0x%016llx\n",
-		 qno, CN93_VF_SDP_R_OUT_CNTS(qno),
-		 octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_CNTS(qno)));
-	dev_info(dev, "R[%d]_OUT_INT_LEVELS[0x%llx]: 0x%016llx\n",
-		 qno, CN93_VF_SDP_R_OUT_INT_LEVELS(qno),
-		 octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_INT_LEVELS(qno)));
-	dev_info(dev, "R[%d]_OUT_PKT_CNT[0x%llx]: 0x%016llx\n",
-		 qno, CN93_VF_SDP_R_OUT_PKT_CNT(qno),
-		 octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_PKT_CNT(qno)));
-	dev_info(dev, "R[%d]_OUT_BYTE_CNT[0x%llx]: 0x%016llx\n",
-		 qno, CN93_VF_SDP_R_OUT_BYTE_CNT(qno),
-		 octep_vf_read_csr64(oct, CN93_VF_SDP_R_OUT_BYTE_CNT(qno)));
-}
-
-
-/* Dump queue hardware registers (including Tx/Rx queues) for debugging. */
-static void octep_vf_dump_OQ_registers_cn93(struct octep_vf_device *oct, int q)
-{
-	cn93_vf_dump_oq_regs(oct, q);
 }
 
 /**
@@ -532,6 +485,5 @@ void octep_vf_device_setup_cn93(struct octep_vf_device *oct)
 	oct->hw_ops.reset_io_queues = octep_vf_reset_io_queues_cn93;
 
 	oct->hw_ops.dump_registers = octep_vf_dump_registers_cn93;
-	oct->hw_ops.dump_OQ_registers = octep_vf_dump_OQ_registers_cn93;
 	octep_vf_init_config_cn93_vf(oct);
 }

@@ -7,17 +7,15 @@
 #ifndef _OCTEP_VF_MBOX_H_
 #define _OCTEP_VF_MBOX_H_
 
-/*
- * When a new command is implemented, VF Mbox version should be bumped.
+/* When a new command is implemented, VF Mbox version should be bumped.
  */
 enum octep_pfvf_mbox_version {
 	OCTEP_PFVF_MBOX_VERSION_V0,
 	OCTEP_PFVF_MBOX_VERSION_V1,
-	OCTEP_PFVF_MBOX_VERSION_V2,
-	OCTEP_PFVF_MBOX_VERSION_V3,
+	OCTEP_PFVF_MBOX_VERSION_V2
 };
 
-#define OCTEP_PFVF_MBOX_VERSION_CURRENT OCTEP_PFVF_MBOX_VERSION_V3
+#define OCTEP_PFVF_MBOX_VERSION_CURRENT OCTEP_PFVF_MBOX_VERSION_V2
 
 enum octep_pfvf_mbox_opcode {
 	OCTEP_PFVF_MBOX_CMD_VERSION,
@@ -34,7 +32,6 @@ enum octep_pfvf_mbox_opcode {
 	OCTEP_PFVF_MBOX_CMD_GET_FW_INFO,
 	OCTEP_PFVF_MBOX_CMD_SET_OFFLOADS,
 	OCTEP_PFVF_MBOX_NOTIF_LINK_STATUS,
-	OCTEP_PFVF_MBOX_NOTIF_PF_FLR,
 	OCTEP_PFVF_MBOX_CMD_MAX,
 };
 

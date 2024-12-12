@@ -4,7 +4,7 @@
  * Copyright (C) 2020 Marvell.
  *
  */
-#include <linux/types.h>
+
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/string.h>
@@ -21,17 +21,13 @@
 #include "octep_pfvf_mbox.h"
 #include "octep_ctrl_net.h"
 
-/*
- * When a new command is implemented, the below table should be updated
+/* When a new command is implemented, the below table should be updated
  * with new command and it's version info.
  */
-
 static u32 pfvf_cmd_versions[OCTEP_PFVF_MBOX_CMD_MAX] = {
 	[0 ... OCTEP_PFVF_MBOX_CMD_DEV_REMOVE] = OCTEP_PFVF_MBOX_VERSION_V1,
 	[OCTEP_PFVF_MBOX_CMD_GET_FW_INFO ... OCTEP_PFVF_MBOX_NOTIF_LINK_STATUS] =
-		OCTEP_PFVF_MBOX_VERSION_V2,
-	[OCTEP_PFVF_MBOX_NOTIF_PF_FLR] =
-		OCTEP_PFVF_MBOX_VERSION_V3
+		OCTEP_PFVF_MBOX_VERSION_V2
 };
 
 static void octep_pfvf_validate_version(struct octep_device *oct,  u32 vf_id,
@@ -100,9 +96,8 @@ static void octep_pfvf_set_rx_state(struct octep_device *oct, u32 vf_id,
 	rsp->s_link_state.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 }
 
-int
-octep_send_notification(struct octep_device *oct, u32 vf_id,
-			union octep_pfvf_mbox_word cmd)
+static int octep_send_notification(struct octep_device *oct, u32 vf_id,
+				   union octep_pfvf_mbox_word cmd)
 {
 	u32 max_rings_per_vf, vf_mbox_queue;
 	struct octep_mbox *mbox;
@@ -151,9 +146,6 @@ static void octep_pfvf_get_mtu(struct octep_device *oct, u32 vf_id,
 	int max_rx_pktlen = oct->netdev->max_mtu + (ETH_HLEN + ETH_FCS_LEN);
 
 	rsp->s_set_mtu.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
-	/* FIXME: next step is to get it from per vf_id structure stored in PF.
-	 * Each VF may have different MTU setting
-	 */
 	rsp->s_get_mtu.mtu = max_rx_pktlen;
 }
 
@@ -163,12 +155,24 @@ static void octep_pfvf_set_mac_addr(struct octep_device *oct,  u32 vf_id,
 {
 	int err;
 
+	if ((oct->vf_info[vf_id].flags & OCTEON_PFVF_FLAG_MAC_SET_BY_PF) &&
+	    !oct->vf_info[vf_id].trusted) {
+		dev_err(&oct->pdev->dev,
+			"VF%d attempted to override administrative set MAC address\n",
+			vf_id);
+		rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
+		return;
+	}
+
 	err = octep_ctrl_net_set_mac_addr(oct, vf_id, cmd.s_set_mac.mac_addr, true);
 	if (err) {
 		rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
-		dev_err(&oct->pdev->dev, "Set VF MAC address failed via host control Mbox\n");
+		dev_err(&oct->pdev->dev, "Set VF%d MAC address failed via host control Mbox\n",
+			vf_id);
 		return;
 	}
+
+	ether_addr_copy(oct->vf_info[vf_id].mac_addr, cmd.s_set_mac.mac_addr);
 	rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 }
 
@@ -178,20 +182,26 @@ static void octep_pfvf_get_mac_addr(struct octep_device *oct,  u32 vf_id,
 {
 	int err;
 
+	if (oct->vf_info[vf_id].flags & OCTEON_PFVF_FLAG_MAC_SET_BY_PF) {
+		dev_dbg(&oct->pdev->dev, "VF%d MAC address set by PF\n", vf_id);
+		ether_addr_copy(rsp->s_set_mac.mac_addr,
+				oct->vf_info[vf_id].mac_addr);
+		rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
+		return;
+	}
 	err = octep_ctrl_net_get_mac_addr(oct, vf_id, rsp->s_set_mac.mac_addr);
 	if (err) {
 		rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
-		dev_err(&oct->pdev->dev, "Get VF MAC address failed via host control Mbox\n");
+		dev_err(&oct->pdev->dev, "Get VF%d MAC address failed via host control Mbox\n",
+			vf_id);
 		return;
 	}
-
-	ether_addr_copy(oct->vf_info[vf_id].mac_addr, rsp->s_set_mac.mac_addr);
 	rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 }
 
 static void octep_pfvf_dev_remove(struct octep_device *oct,  u32 vf_id,
-				    union octep_pfvf_mbox_word cmd,
-				    union octep_pfvf_mbox_word *rsp)
+				  union octep_pfvf_mbox_word cmd,
+				  union octep_pfvf_mbox_word *rsp)
 {
 	int err;
 
@@ -251,11 +261,10 @@ int octep_setup_pfvf_mbox(struct octep_device *oct)
 	int i = 0, num_vfs = 0, rings_per_vf = 0;
 	int ring = 0;
 
-	num_vfs = oct->conf->sriov_cfg.max_vfs;
+	num_vfs = oct->conf->sriov_cfg.active_vfs;
 	rings_per_vf = oct->conf->sriov_cfg.max_rings_per_vf;
 
 	for (i = 0; i < num_vfs; i++) {
-		/* TODO: FIXME: VSR: discuss about the usage of i and ring variables */
 		ring  = rings_per_vf * i;
 		oct->mbox[ring] = vzalloc(sizeof(*oct->mbox[ring]));
 
@@ -282,7 +291,7 @@ free_mbox:
 		vfree(oct->mbox[ring]);
 		oct->mbox[ring] = NULL;
 	}
-	return 1;
+	return -ENOMEM;
 }
 
 void octep_delete_pfvf_mbox(struct octep_device *oct)
@@ -410,11 +419,6 @@ void octep_pfvf_mbox_work(struct work_struct *work)
 
 	mutex_lock(&mbox->lock);
 	cmd.u64 = readq(mbox->vf_pf_data_reg);
-	if (unlikely(cmd.u64 == 0xFFFFFFFFFFFFFFFFU)) {
-		mutex_unlock(&mbox->lock);
-		return;
-	}
-
 	rsp.u64 = 0;
 
 	switch (cmd.s.opcode) {

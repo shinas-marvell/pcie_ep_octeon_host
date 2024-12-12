@@ -13,7 +13,6 @@
 #include "octep_main.h"
 #include "octep_regs_cn9k_pf.h"
 
-/* We will support 128 pf's in control mbox */
 #define CTRL_MBOX_MAX_PF	128
 #define CTRL_MBOX_SZ		((size_t)(0x400000 / CTRL_MBOX_MAX_PF))
 
@@ -202,9 +201,9 @@ static void octep_init_config_cn93_pf(struct octep_device *oct)
 {
 	struct octep_config *conf = oct->conf;
 	struct pci_dev *pdev = oct->pdev;
+	u8 link = 0;
 	u64 val;
 	int pos;
-	u8 link = 0;
 
 	/* Read ring configuration:
 	 * PF ring count, number of VFs and rings per VF supported
@@ -213,7 +212,7 @@ static void octep_init_config_cn93_pf(struct octep_device *oct)
 	conf->sriov_cfg.max_rings_per_vf = CN93_SDP_EPF_RINFO_RPVF(val);
 	conf->sriov_cfg.active_rings_per_vf = conf->sriov_cfg.max_rings_per_vf;
 	conf->sriov_cfg.max_vfs = CN93_SDP_EPF_RINFO_NVFS(val);
-	conf->sriov_cfg.active_vfs = 0;
+	conf->sriov_cfg.active_vfs = conf->sriov_cfg.max_vfs;
 	conf->sriov_cfg.vf_srn = CN93_SDP_EPF_RINFO_SRN(val);
 
 	val = octep_read_csr64(oct, CN93_SDP_MAC_PF_RING_CTL(oct->pcie_port));
@@ -258,7 +257,6 @@ static void octep_init_config_cn93_pf(struct octep_device *oct)
 
 	conf->fw_info.hb_interval = OCTEP_DEFAULT_FW_HB_INTERVAL;
 	conf->fw_info.hb_miss_count = OCTEP_DEFAULT_FW_HB_MISS_COUNT;
-
 }
 
 /* Setup registers for a hardware Tx Queue  */
@@ -309,7 +307,7 @@ static void octep_setup_iq_regs_cn93_pf(struct octep_device *oct, int iq_no)
 }
 
 /* Setup registers for a hardware Rx Queue  */
-static int octep_setup_oq_regs_cn93_pf(struct octep_device *oct, int oq_no)
+static void octep_setup_oq_regs_cn93_pf(struct octep_device *oct, int oq_no)
 {
 	u64 reg_val;
 	u64 oq_ctl = 0ULL;
@@ -357,7 +355,6 @@ static int octep_setup_oq_regs_cn93_pf(struct octep_device *oct, int oq_no)
 	reg_val = ((u64)time_threshold << 32) |
 		  CFG_GET_OQ_INTR_PKT(oct->conf);
 	octep_write_csr64(oct, CN93_SDP_R_OUT_INT_LEVELS(oq_no), reg_val);
-	return 0;
 }
 
 /* Setup registers for a PF mailbox */
@@ -366,13 +363,10 @@ static void octep_setup_mbox_regs_cn93_pf(struct octep_device *oct, int q_no)
 	struct octep_mbox *mbox = oct->mbox[q_no];
 
 	/* PF to VF DATA reg. PF writes into this reg */
-	mbox->pf_vf_data_reg = oct->mmio[0].hw_addr +
-				CN93_SDP_MBOX_PF_VF_DATA(q_no);
+	mbox->pf_vf_data_reg = oct->mmio[0].hw_addr + CN93_SDP_MBOX_PF_VF_DATA(q_no);
 
 	/* VF to PF DATA reg. PF reads from this reg */
-	mbox->vf_pf_data_reg = oct->mmio[0].hw_addr +
-				CN93_SDP_MBOX_VF_PF_DATA(q_no);
-
+	mbox->vf_pf_data_reg = oct->mmio[0].hw_addr + CN93_SDP_MBOX_VF_PF_DATA(q_no);
 }
 
 /* Poll for mailbox messages from VF */
@@ -384,11 +378,6 @@ static void octep_poll_pfvf_mailbox(struct octep_device *oct)
 	reg0 = octep_read_csr64(oct, CN93_SDP_EPF_MBOX_RINT(0));
 	reg1 = octep_read_csr64(oct, CN93_SDP_EPF_MBOX_RINT(1));
 	if (reg0 || reg1) {
-		/*
-		 * dev_info(&oct->pdev->dev, "Received MBOX_RINT intr: reg0 0x%llx reg1 0x%llx\n",
-		 * reg0, reg1);
-		 */
-
 		active_vfs = CFG_GET_ACTIVE_VFS(oct->conf);
 		active_rings_per_vf = CFG_GET_ACTIVE_RPVF(oct->conf);
 		for (vf = 0; vf < active_vfs; vf++) {
@@ -450,7 +439,6 @@ static irqreturn_t octep_oei_intr_handler_cn93_pf(void *dev)
 
 /* Process non-ioq interrupts required to keep pf interface running.
  * OEI_RINT is needed for control mailbox
- * MBOX_RINT is needed for pfvf mailbox
  */
 static void octep_poll_non_ioq_interrupts_cn93_pf(struct octep_device *oct)
 {
@@ -649,16 +637,6 @@ static int octep_soft_reset_cn93_pf(struct octep_device *oct)
 
 	octep_write_csr64(oct, CN93_SDP_WIN_WR_MASK_REG, 0xFF);
 
-	/* Firmware status CSR is supposed to be cleared by
-	 * core domain reset, but due to a hw bug, it is not.
-	 * Set it to RUNNING right before reset so that it is not
-	 * left in READY (1) state after a reset.  This is required
-	 * in addition to the early setting to handle the case where
-	 * the OcteonTX is unexpectedly reset, reboots, and then
-	 * the module is removed.
-	 */
-	OCTEP_PCI_WIN_WRITE(oct, CN9K_PEMX_PFX_CSX_PFCFGX(0, 0, CN9K_PCIEEP_VSECST_CTL),
-			FW_STATUS_DOWNING);
 	/* Set core domain reset bit */
 	OCTEP_PCI_WIN_WRITE(oct, CN93_RST_CORE_DOMAIN_W1S, 1);
 	/* Wait for 100ms as Octeon resets. */
@@ -718,22 +696,14 @@ static void octep_enable_interrupts_cn93_pf(struct octep_device *oct)
 /* Disable all interrupts */
 static void octep_disable_interrupts_cn93_pf(struct octep_device *oct)
 {
-	u64 reg_val, intr_mask = 0ULL;
+	u64 intr_mask = 0ULL;
 	int srn, num_rings, i;
 
 	srn = CFG_GET_PORTS_PF_SRN(oct->conf);
 	num_rings = CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf);
 
-	for (i = 0; i < num_rings; i++) {
+	for (i = 0; i < num_rings; i++)
 		intr_mask |= (0x1ULL << (srn + i));
-		reg_val = octep_read_csr64(oct, CN93_SDP_R_IN_INT_LEVELS(srn + i));
-		reg_val &= ~(0x1ULL << 62);
-		octep_write_csr64(oct, CN93_SDP_R_IN_INT_LEVELS(srn + i), reg_val);
-
-		reg_val = octep_read_csr64(oct, CN93_SDP_R_OUT_INT_LEVELS(srn + i));
-		reg_val &= ~(0x1ULL << 62);
-		octep_write_csr64(oct, CN93_SDP_R_OUT_INT_LEVELS(srn + i), reg_val);
-	}
 
 	octep_write_csr64(oct, CN93_SDP_EPF_IRERR_RINT_ENA_W1C, intr_mask);
 	octep_write_csr64(oct, CN93_SDP_EPF_ORERR_RINT_ENA_W1C, intr_mask);
@@ -757,15 +727,8 @@ static u32 octep_update_iq_read_index_cn93_pf(struct octep_iq *iq)
 	u32 pkt_in_done = readl(iq->inst_cnt_reg);
 	u32 last_done, new_idx;
 
-	if (unlikely(pkt_in_done == 0xFFFFFFFF)) {
-		last_done = 0;
-		if (printk_ratelimit()) {
-			dev_err(iq->dev, "IQ-%u count read failure\n", iq->q_no);
-		}
-	} else {
-		last_done = pkt_in_done - iq->pkt_in_done;
-		iq->pkt_in_done = pkt_in_done;
-	}
+	last_done = pkt_in_done - iq->pkt_in_done;
+	iq->pkt_in_done = pkt_in_done;
 
 	new_idx = (iq->octep_read_index + last_done) % iq->max_count;
 
@@ -931,15 +894,4 @@ void octep_device_setup_cn93_pf(struct octep_device *oct)
 
 	octep_init_config_cn93_pf(oct);
 	octep_configure_ring_mapping_cn93_pf(oct);
-
-	if (oct->chip_id == OCTEP_PCI_DEVICE_ID_CN98_PF)
-		return;
-
-	/* Firmware status CSR is supposed to be cleared by
-	 * core domain reset, but due to IPBUPEM-38842, it is not.
-	 * Set it to RUNNING early in boot, so that unexpected resets
-	 * leave it in a state that is not READY (1).
-	 */
-	OCTEP_PCI_WIN_WRITE(oct, CN9K_PEMX_PFX_CSX_PFCFGX(0, 0, CN9K_PCIEEP_VSECST_CTL),
-			FW_STATUS_RUNNING);
 }

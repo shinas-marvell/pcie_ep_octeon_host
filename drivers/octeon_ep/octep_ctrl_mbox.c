@@ -37,9 +37,9 @@
 
 #define OCTEP_CTRL_MBOX_INFO_MAGIC_NUM(m)	(m)
 #define OCTEP_CTRL_MBOX_INFO_BARMEM_SZ(m)	((m) + 8)
-#define OCTEP_CTRL_MBOX_INFO_HOST_VERSION(m)	((m) + 16)
+#define OCTEP_CTRL_MBOX_INFO_HOST_VERSION(m)   ((m) + 16)
 #define OCTEP_CTRL_MBOX_INFO_HOST_STATUS(m)	((m) + 24)
-#define OCTEP_CTRL_MBOX_INFO_FW_VERSION(m)	((m) + 136)
+#define OCTEP_CTRL_MBOX_INFO_FW_VERSION(m)     ((m) + 136)
 #define OCTEP_CTRL_MBOX_INFO_FW_STATUS(m)	((m) + 144)
 
 #define OCTEP_CTRL_MBOX_H2FQ_INFO(m)	((m) + OCTEP_CTRL_MBOX_INFO_SZ)
@@ -79,14 +79,13 @@ int octep_ctrl_mbox_init(struct octep_ctrl_mbox *mbox)
 		return -EINVAL;
 
 	if (!mbox->barmem) {
-		pr_err("octep_ctrl_mbox : Invalid barmem %p\n", mbox->barmem);
+		pr_info("octep_ctrl_mbox : Invalid barmem %p\n", mbox->barmem);
 		return -EINVAL;
 	}
 
 	magic_num = readq(OCTEP_CTRL_MBOX_INFO_MAGIC_NUM(mbox->barmem));
 	if (magic_num != OCTEP_CTRL_MBOX_MAGIC_NUMBER) {
-		pr_err("octep_ctrl_mbox : Invalid magic number %llx\n",
-			magic_num);
+		pr_info("octep_ctrl_mbox : Invalid magic number %llx\n", magic_num);
 		return -EINVAL;
 	}
 
@@ -104,6 +103,9 @@ int octep_ctrl_mbox_init(struct octep_ctrl_mbox *mbox)
 	writeq(OCTEP_CTRL_MBOX_STATUS_INIT,
 	       OCTEP_CTRL_MBOX_INFO_HOST_STATUS(mbox->barmem));
 
+	mutex_init(&mbox->h2fq_lock);
+	mutex_init(&mbox->f2hq_lock);
+
 	mbox->h2fq.sz = readl(OCTEP_CTRL_MBOX_H2FQ_SZ(mbox->barmem));
 	mbox->h2fq.hw_prod = OCTEP_CTRL_MBOX_H2FQ_PROD(mbox->barmem);
 	mbox->h2fq.hw_cons = OCTEP_CTRL_MBOX_H2FQ_CONS(mbox->barmem);
@@ -116,21 +118,22 @@ int octep_ctrl_mbox_init(struct octep_ctrl_mbox *mbox)
 			  OCTEP_CTRL_MBOX_TOTAL_INFO_SZ +
 			  mbox->h2fq.sz;
 
-	writeq(mbox->version,
-	       OCTEP_CTRL_MBOX_INFO_HOST_VERSION(mbox->barmem));
+	writeq(mbox->version, OCTEP_CTRL_MBOX_INFO_HOST_VERSION(mbox->barmem));
 	/* ensure ready state is seen after everything is initialized */
 	wmb();
 	writeq(OCTEP_CTRL_MBOX_STATUS_READY,
 	       OCTEP_CTRL_MBOX_INFO_HOST_STATUS(mbox->barmem));
 
+	pr_info("Octep ctrl mbox : Init successful.\n");
+
 	return 0;
 }
 
-static int
+static void
 octep_write_mbox_data(struct octep_ctrl_mbox_q *q, u32 *pi, u32 ci, void *buf, u32 w_sz)
 {
-	u32 cp_sz;
 	u8 __iomem *qbuf;
+	u32 cp_sz;
 
 	/* Assumption: Caller has ensured enough write space */
 	qbuf = (q->hw_q + *pi);
@@ -139,7 +142,7 @@ octep_write_mbox_data(struct octep_ctrl_mbox_q *q, u32 *pi, u32 ci, void *buf, u
 		memcpy_toio(qbuf, buf, w_sz);
 		*pi = octep_ctrl_mbox_circq_inc(*pi, w_sz, q->sz);
 	} else {
-		/* copy upto end of queue */
+		/* copy up to end of queue */
 		cp_sz = min((q->sz - *pi), w_sz);
 		memcpy_toio(qbuf, buf, cp_sz);
 		w_sz -= cp_sz;
@@ -152,12 +155,9 @@ octep_write_mbox_data(struct octep_ctrl_mbox_q *q, u32 *pi, u32 ci, void *buf, u
 			*pi = octep_ctrl_mbox_circq_inc(*pi, w_sz, q->sz);
 		}
 	}
-
-	return 0;
 }
 
-int
-octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *msg)
+int octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *msg)
 {
 	struct octep_ctrl_mbox_msg_buf *sg;
 	struct octep_ctrl_mbox_q *q;
@@ -174,13 +174,9 @@ octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *m
 	q = &mbox->h2fq;
 	pi = readl(q->hw_prod);
 	ci = readl(q->hw_cons);
-	if (unlikely(pi == 0xFFFFFFFFU || ci == 0xFFFFFFFFU)) {
-		mutex_unlock(&mbox->f2hq_lock);
-		return -EIO;
-	}
 
 	if (octep_ctrl_mbox_circq_space(pi, ci, q->sz) < (msg->hdr.s.sz + mbox_hdr_sz)) {
-		mutex_unlock(&mbox->f2hq_lock);
+		mutex_unlock(&mbox->h2fq_lock);
 		return -EAGAIN;
 	}
 
@@ -198,11 +194,11 @@ octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *m
 	return 0;
 }
 
-static int
+static void
 octep_read_mbox_data(struct octep_ctrl_mbox_q *q, u32 pi, u32 *ci, void *buf, u32 r_sz)
 {
-	u32 cp_sz;
 	u8 __iomem *qbuf;
+	u32 cp_sz;
 
 	/* Assumption: Caller has ensured enough read space */
 	qbuf = (q->hw_q + *ci);
@@ -211,7 +207,7 @@ octep_read_mbox_data(struct octep_ctrl_mbox_q *q, u32 pi, u32 *ci, void *buf, u3
 		memcpy_fromio(buf, qbuf, r_sz);
 		*ci = octep_ctrl_mbox_circq_inc(*ci, r_sz, q->sz);
 	} else {
-		/* copy upto end of queue */
+		/* copy up to end of queue */
 		cp_sz = min((q->sz - *ci), r_sz);
 		memcpy_fromio(buf, qbuf, cp_sz);
 		r_sz -= cp_sz;
@@ -224,20 +220,14 @@ octep_read_mbox_data(struct octep_ctrl_mbox_q *q, u32 pi, u32 *ci, void *buf, u3
 			*ci = octep_ctrl_mbox_circq_inc(*ci, r_sz, q->sz);
 		}
 	}
-
-	return 0;
 }
 
-int
-octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *msg)
+int octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *msg)
 {
 	struct octep_ctrl_mbox_msg_buf *sg;
 	u32 pi, ci, r_sz, buf_sz, q_depth;
 	struct octep_ctrl_mbox_q *q;
 	int s;
-
-	if (!mbox || !msg)
-		return -EINVAL;
 
 	if (readq(OCTEP_CTRL_MBOX_INFO_FW_STATUS(mbox->barmem)) != OCTEP_CTRL_MBOX_STATUS_READY)
 		return -EIO;
@@ -246,10 +236,6 @@ octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *m
 	q = &mbox->f2hq;
 	pi = readl(q->hw_prod);
 	ci = readl(q->hw_cons);
-	if (unlikely(pi == 0xFFFFFFFFU || ci == 0xFFFFFFFFU)) {
-		mutex_unlock(&mbox->f2hq_lock);
-		return -EIO;
-	}
 
 	q_depth = octep_ctrl_mbox_circq_depth(pi, ci, q->sz);
 	if (q_depth < mbox_hdr_sz) {
@@ -259,7 +245,6 @@ octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *m
 
 	octep_read_mbox_data(q, pi, &ci, (void *)&msg->hdr, mbox_hdr_sz);
 	buf_sz = msg->hdr.s.sz;
-
 	for (s = 0; ((s < msg->sg_num) && (buf_sz > 0)); s++) {
 		sg = &msg->sg_list[s];
 		r_sz = (sg->sz <= buf_sz) ? sg->sz : buf_sz;
@@ -269,22 +254,17 @@ octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *m
 	writel(ci, q->hw_cons);
 	mutex_unlock(&mbox->f2hq_lock);
 
-	if (readq(OCTEP_CTRL_MBOX_INFO_FW_STATUS(mbox->barmem)) != OCTEP_CTRL_MBOX_STATUS_READY)
-		return -EIO;
-
 	return 0;
 }
 
-int
-octep_ctrl_mbox_uninit(struct octep_ctrl_mbox *mbox)
+int octep_ctrl_mbox_uninit(struct octep_ctrl_mbox *mbox)
 {
 	if (!mbox)
 		return -EINVAL;
 	if (!mbox->barmem)
 		return -EINVAL;
 
-	writeq(0,
-	       OCTEP_CTRL_MBOX_INFO_HOST_VERSION(mbox->barmem));
+	writeq(0, OCTEP_CTRL_MBOX_INFO_HOST_VERSION(mbox->barmem));
 	writeq(OCTEP_CTRL_MBOX_STATUS_INVALID,
 	       OCTEP_CTRL_MBOX_INFO_HOST_STATUS(mbox->barmem));
 	/* ensure uninit state is written before uninitialization */

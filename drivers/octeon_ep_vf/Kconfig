@@ -7,7 +7,6 @@ config OCTEON_EP_VF
 	tristate "Marvell Octeon PCI Endpoint NIC VF Driver"
 	depends on 64BIT
 	depends on PCI
-	depends on PTP_1588_CLOCK_OPTIONAL
 	help
 	  This driver supports networking functionality of Marvell's
 	  Octeon PCI Endpoint NIC VF.

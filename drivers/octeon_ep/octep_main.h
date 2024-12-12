@@ -18,17 +18,11 @@
 #define  OCTEP_PCIID_CN93_PF  0xB200177d
 #define  OCTEP_PCIID_CN93_VF  0xB203177d
 
-#define	 OCTEP_PCI_DEVICE_ID_CN98_PF 0xB100
-#define	 OCTEP_PCI_DEVICE_ID_CN98_VF 0xB103
-
+#define  OCTEP_PCI_DEVICE_ID_CN98_PF 0xB100
 #define  OCTEP_PCI_DEVICE_ID_CN93_PF 0xB200
 #define  OCTEP_PCI_DEVICE_ID_CN93_VF 0xB203
 
-#define  OCTEP_PCI_DEVICE_ID_CNF95O_PF 0xB600    //95O PF
-#define  OCTEP_PCI_DEVICE_ID_CNF95O_VF 0xB603    //95O VF
-
 #define  OCTEP_PCI_DEVICE_ID_CNF95N_PF 0xB400    //95N PF
-#define  OCTEP_PCI_DEVICE_ID_CNF95N_VF 0xB403    //95N VF
 
 #define  OCTEP_PCI_DEVICE_ID_CN10KA_PF  0xB900   //CN10KA PF
 #define  OCTEP_PCI_DEVICE_ID_CNF10KA_PF 0xBA00   //CNF10KA PF
@@ -38,7 +32,7 @@
 #define  OCTEP_MAX_QUEUES   63
 #define  OCTEP_MAX_IQ       OCTEP_MAX_QUEUES
 #define  OCTEP_MAX_OQ       OCTEP_MAX_QUEUES
-#define  OCTEP_MAX_VF       128
+#define  OCTEP_MAX_VF       64
 
 #define OCTEP_MAX_MSIX_VECTORS OCTEP_MAX_OQ
 
@@ -53,12 +47,13 @@
 
 #define  OCTEP_MMIO_REGIONS     3
 
-#define  IQ_INSTR_PENDING(iq)  ((iq->host_write_index - iq->flush_index) & iq->ring_size_mask)
-#define  IQ_INSTR_SPACE(iq)    (iq->max_count - IQ_INSTR_PENDING(iq))
-
-#ifndef UINT64_MAX
-#define UINT64_MAX (u64)(~((u64) 0))        /* 0xFFFFFFFFFFFFFFFF */
-#endif
+#define  IQ_INSTR_PENDING(iq)  ({ typeof(iq) iq__ = (iq); \
+				  ((iq__)->host_write_index - (iq__)->flush_index) & \
+				  (iq__)->ring_size_mask; \
+				})
+#define  IQ_INSTR_SPACE(iq)    ({ typeof(iq) iq_ = (iq); \
+				  (iq_)->max_count - IQ_INSTR_PENDING(iq_); \
+				})
 
 /* PCI address space mapping information.
  * Each of the 3 address spaces given by BAR0, BAR2 and BAR4 of
@@ -82,7 +77,7 @@ struct octep_pci_win_regs {
 
 struct octep_hw_ops {
 	void (*setup_iq_regs)(struct octep_device *oct, int q);
-	int (*setup_oq_regs)(struct octep_device *oct, int q);
+	void (*setup_oq_regs)(struct octep_device *oct, int q);
 	void (*setup_mbox_regs)(struct octep_device *oct, int mbox);
 
 	irqreturn_t (*mbox_intr_handler)(void *ioq_vector);
@@ -227,23 +222,7 @@ struct octep_pfvf_info {
 	u8 mac_addr[ETH_ALEN];
 	u32 flags;
 	u32 mbox_version;
-};
-
-/* Device status */
-enum octep_dev_status {
-	OCTEP_DEV_STATUS_INVALID,
-	OCTEP_DEV_STATUS_ALLOC,
-	OCTEP_DEV_STATUS_WAIT_FOR_FW,
-	OCTEP_DEV_STATUS_INIT,
-	OCTEP_DEV_STATUS_READY,
-	OCTEP_DEV_STATUS_UNINIT
-};
-
-/* Device state */
-enum octep_dev_state {
-	OCTEP_DEV_STATE_OPEN,
-	OCTEP_DEV_STATE_READ_STATS,
-	OCTEP_DEV_STATE_DOWN_IN_PROGRESS,
+	bool trusted;
 };
 
 /* The Octeon device specific private data structure.
@@ -319,9 +298,11 @@ struct octep_device {
 
 	/* control mbox over pf */
 	struct octep_ctrl_mbox ctrl_mbox;
+
 	/* offset for iface stats */
 	u32 ctrl_mbox_ifstats_offset;
-	/* Work entry to process ctrl mbox */
+
+	/* Work entry to handle ctrl mbox interrupt */
 	struct work_struct ctrl_mbox_task;
 	/* Wait queue for host to firmware requests */
 	wait_queue_head_t ctrl_req_wait_q;
@@ -333,19 +314,12 @@ struct octep_device {
 	/* Work entry to poll non-ioq interrupts */
 	struct delayed_work intr_poll_task;
 
-	/* Work entry to handle device setup */
-	struct work_struct dev_setup_task;
-	/* Device status */
-	atomic_t status;
-
 	/* Firmware heartbeat timer */
 	struct timer_list hb_timer;
 	/* Firmware heartbeat miss count tracked by timer */
 	atomic_t hb_miss_cnt;
 	/* Task to reset device on heartbeat miss */
 	struct delayed_work hb_task;
-	/* Device state */
-	unsigned long state;
 };
 
 static inline u16 OCTEP_MAJOR_REV(struct octep_device *oct)
