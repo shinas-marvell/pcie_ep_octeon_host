@@ -591,16 +591,10 @@ static int octep_napi_poll(struct napi_struct *napi, int budget)
 {
 	struct octep_ioq_vector *ioq_vector =
 		container_of(napi, struct octep_ioq_vector, napi);
-	struct octep_device *octep_dev = ioq_vector->octep_dev;
 	u32 tx_pending, rx_done;
 
 	tx_pending = octep_iq_process_completions(ioq_vector->iq, budget);
 	rx_done = octep_oq_process_rx(ioq_vector->oq, budget);
-
-	octep_dev->iface_tx_stats.pkts += ioq_vector->iq->stats.instr_completed;
-	octep_dev->iface_tx_stats.octs += ioq_vector->iq->stats.bytes_sent;
-	octep_dev->iface_rx_stats.pkts += ioq_vector->oq->stats.packets;
-	octep_dev->iface_rx_stats.octets += ioq_vector->oq->stats.bytes;
 
 	/* need more polling if tx completion processing is still pending or
 	 * processed at least 'budget' number of rx packets.
@@ -828,7 +822,7 @@ static inline int octep_iq_full_check(struct octep_iq *iq)
 	if (unlikely(IQ_INSTR_SPACE(iq) >
 		     OCTEP_WAKE_QUEUE_THRESHOLD)) {
 		netif_start_subqueue(iq->netdev, iq->q_no);
-		iq->stats.restart_cnt++;
+		iq->stats->restart_cnt++;
 		return 0;
 	}
 
@@ -966,7 +960,7 @@ static netdev_tx_t octep_start_xmit(struct sk_buff *skb,
 	wmb();
 	/* Ring Doorbell to notify the NIC of new packets */
 	writel(iq->fill_cnt, iq->doorbell_reg);
-	iq->stats.instr_posted += iq->fill_cnt;
+	iq->stats->instr_posted += iq->fill_cnt;
 	iq->fill_cnt = 0;
 	return NETDEV_TX_OK;
 
@@ -998,6 +992,18 @@ static void octep_get_stats64(struct net_device *netdev,
 			      struct rtnl_link_stats64 *stats)
 {
 	struct octep_device *oct = netdev_priv(netdev);
+	int q;
+
+	oct->iface_tx_stats.pkts = 0;
+	oct->iface_tx_stats.octs = 0;
+	oct->iface_rx_stats.pkts = 0;
+	oct->iface_rx_stats.octets = 0;
+	for (q = 0; q < oct->num_ioq_stats; q++) {
+		oct->iface_tx_stats.pkts += oct->stats_iq[q].instr_completed;
+		oct->iface_tx_stats.octs += oct->stats_iq[q].bytes_sent;
+		oct->iface_rx_stats.pkts += oct->stats_oq[q].packets;
+		oct->iface_rx_stats.octets += oct->stats_oq[q].bytes;
+	}
 
 	stats->tx_packets = oct->iface_tx_stats.pkts;
 	stats->tx_bytes = oct->iface_tx_stats.octs;
