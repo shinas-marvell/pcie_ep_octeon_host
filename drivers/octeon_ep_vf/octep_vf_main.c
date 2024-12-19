@@ -523,8 +523,6 @@ static int octep_vf_stop(struct net_device *netdev)
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
 
-	synchronize_net();
-
 	netdev_info(netdev, "Stopping the device ...\n");
 
 	/* Stop Tx from stack */
@@ -788,6 +786,9 @@ static void octep_vf_get_stats64(struct net_device *netdev,
 	tx_bytes = 0;
 	rx_packets = 0;
 	rx_bytes = 0;
+	if (!netif_running(netdev))
+		return;
+
 	for (q = 0; q < oct->num_oqs; q++) {
 		struct octep_vf_iq *iq = oct->iq[q];
 		struct octep_vf_oq *oq = oct->oq[q];
