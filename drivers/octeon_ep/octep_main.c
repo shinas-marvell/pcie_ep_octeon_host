@@ -757,8 +757,6 @@ static int octep_stop(struct net_device *netdev)
 {
 	struct octep_device *oct = netdev_priv(netdev);
 
-	synchronize_net();
-
 	netdev_info(netdev, "Stopping the device ...\n");
 
 	octep_ctrl_net_set_link_status(oct, OCTEP_CTRL_NET_INVALID_VFID, false,
@@ -1001,6 +999,10 @@ static void octep_get_stats64(struct net_device *netdev,
 	tx_bytes = 0;
 	rx_packets = 0;
 	rx_bytes = 0;
+
+	if (!netif_running(netdev))
+		return;
+
 	for (q = 0; q < oct->num_oqs; q++) {
 		struct octep_iq *iq = oct->iq[q];
 		struct octep_oq *oq = oct->oq[q];
@@ -1426,7 +1428,7 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	int max_rx_pktlen;
 	int err;
 
-	pr_info("%s: octeon_ep patched version for upstreaming unofficial 0.0", __func__);
+	pr_info("%s: octeon_ep patched version for upstreaming unofficial 0.1", __func__);
 	err = pci_enable_device(pdev);
 	if (err) {
 		dev_err(&pdev->dev, "Failed to enable PCI device\n");
