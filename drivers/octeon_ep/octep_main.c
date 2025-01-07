@@ -591,10 +591,16 @@ static int octep_napi_poll(struct napi_struct *napi, int budget)
 {
 	struct octep_ioq_vector *ioq_vector =
 		container_of(napi, struct octep_ioq_vector, napi);
+	struct octep_device *octep_dev = ioq_vector->octep_dev;
 	u32 tx_pending, rx_done;
 
 	tx_pending = octep_iq_process_completions(ioq_vector->iq, budget);
 	rx_done = octep_oq_process_rx(ioq_vector->oq, budget);
+
+	octep_dev->iface_tx_stats.pkts += ioq_vector->iq->stats.instr_completed;
+	octep_dev->iface_tx_stats.octs += ioq_vector->iq->stats.bytes_sent;
+	octep_dev->iface_rx_stats.pkts += ioq_vector->oq->stats.packets;
+	octep_dev->iface_rx_stats.octets += ioq_vector->oq->stats.bytes;
 
 	/* need more polling if tx completion processing is still pending or
 	 * processed at least 'budget' number of rx packets.
@@ -991,31 +997,12 @@ dma_map_err:
 static void octep_get_stats64(struct net_device *netdev,
 			      struct rtnl_link_stats64 *stats)
 {
-	u64 tx_packets, tx_bytes, rx_packets, rx_bytes;
 	struct octep_device *oct = netdev_priv(netdev);
-	int q;
 
-	tx_packets = 0;
-	tx_bytes = 0;
-	rx_packets = 0;
-	rx_bytes = 0;
-
-	if (!netif_running(netdev))
-		return;
-
-	for (q = 0; q < oct->num_oqs; q++) {
-		struct octep_iq *iq = oct->iq[q];
-		struct octep_oq *oq = oct->oq[q];
-
-		tx_packets += iq->stats.instr_completed;
-		tx_bytes += iq->stats.bytes_sent;
-		rx_packets += oq->stats.packets;
-		rx_bytes += oq->stats.bytes;
-	}
-	stats->tx_packets = tx_packets;
-	stats->tx_bytes = tx_bytes;
-	stats->rx_packets = rx_packets;
-	stats->rx_bytes = rx_bytes;
+	stats->tx_packets = oct->iface_tx_stats.pkts;
+	stats->tx_bytes = oct->iface_tx_stats.octs;
+	stats->rx_packets = oct->iface_rx_stats.pkts;
+	stats->rx_bytes = oct->iface_rx_stats.octets;
 }
 
 /**
@@ -1428,7 +1415,7 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	int max_rx_pktlen;
 	int err;
 
-	pr_info("%s: octeon_ep patched version for upstreaming unofficial 0.1", __func__);
+	pr_info("%s: octeon_ep patched version for upstreaming unofficial 0.2", __func__);
 	err = pci_enable_device(pdev);
 	if (err) {
 		dev_err(&pdev->dev, "Failed to enable PCI device\n");
