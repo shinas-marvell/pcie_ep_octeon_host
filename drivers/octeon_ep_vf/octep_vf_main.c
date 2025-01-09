@@ -1041,7 +1041,7 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct net_device *netdev;
 	int err;
 
-	pr_info("%s: octeon_ep_vf patched version for upstreaming unofficial 0.2", __func__);
+	pr_info("%s: octeon_ep_vf patched version for upstreaming unofficial 0.3", __func__);
 	err = pci_enable_device(pdev);
 	if (err) {
 		dev_err(&pdev->dev, "Failed to enable PCI device\n");
